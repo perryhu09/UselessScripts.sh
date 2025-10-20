@@ -44,8 +44,6 @@ minetest-server
 minecraft-server
 valheim-server
 teeworlds-server
-openvpn (if not required)
-tinc (if not required)
 responder
 ettercap
 bettercap
@@ -60,7 +58,6 @@ hping3
 masscan
 zmap
 unicornscan
-nmap-scripts
 zenmap
 net-creds
 crackmapexec
@@ -90,7 +87,6 @@ cowpatty
 ophcrack
 findmyhash
 ophcrack-tools
-mimikatz (services or wrappers)
 evil-winrm
 evilginx2
 weevely
@@ -123,8 +119,6 @@ burpsuite-pro
 burpsuite-community-edition
 zaproxy
 zap
-gophish
-king-phisher
 phpsploit
 shellter
 empire
@@ -155,24 +149,12 @@ fern-wifi-cracker
 gerix-wifi-cracker-ng
 pixiewps
 macchanger
-hostapd (if used as rogue AP)
-wpa-supplicant (on non-client images)
-wpasupplicant-daemon
-honeyd
-radare2 (services or daemons)
-censys
-shodan (daemonized crawlers)
-masscan
-fragroute
-tcptrace
-tcpflow
 ncat
 nc
-socat (if used as reverse tunnel)
+socat
 chisel
 proxychains
-sshuttle (if used for tunneling)
-vpn-daemon (generic P2P VPN services not centrally managed)
+sshuttle
 plexmediaserver
 jellyfin
 emby-server
@@ -187,7 +169,6 @@ covenant
 sliver
 pupy
 quasar
-empire
 empire3
 cobalt-strike
 teamserver
@@ -196,19 +177,3 @@ bloodhound
 nimcrypt2
 donut
 sharpshooter
-metasploit
-msfconsole
-msfdb
-msfvenom
-msfrpc
-msfrpcd
-msfd
-impacket
-crackmapexec
-evil-winrm
-weevely
-weevely-server
-powersploit
-phpsploit
-shellter
-empire

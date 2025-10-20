@@ -7,7 +7,7 @@ arachni
 arp-scan
 arpspoof
 bettercap
-beEF-xss
+beef-xss
 bloodhound
 burpsuite
 burp-suite
@@ -16,7 +16,6 @@ burpsuite-community-edition
 censys
 cewl
 chisel
-chkrootkit
 commix
 cowpatty
 crackmapexec
@@ -55,7 +54,6 @@ john
 john-the-ripper
 king-phisher
 kismet
-lynis
 macchanger
 maltego
 masscan
@@ -135,7 +133,7 @@ yara
 zap
 zaproxy
 zenmap
-Zmap
+zmap
 steam
 steam-launcher
 lutris
@@ -177,8 +175,6 @@ bomberclone
 openttd
 openra
 openra-data
-
-
 openarena
 sauerbraten
 xonotic
@@ -218,7 +214,7 @@ games
 gnome-games
 kdegames
 kdegames-data
-Gnome-games-data
+gnome-games-data
 transmission
 transmission-gtk
 transmission-cli
@@ -240,18 +236,17 @@ popcorn-time
 sopcast
 acestream
 peerflix
-stremio 
+stremio
 webtorrent-hybrid
 peerflix-cli
 resilio-sync
 btsync
 syncthing
-Maidsafe
+maidsafe
 seafile
 emule
 amule
 edonkey
-eDonkey
 shareaza
 gnutella
 gtk-gnutella
@@ -271,17 +266,16 @@ retroshare
 i2p
 freenet
 gnunet
-cjdns ackett
+cjdns
 sonarr
 radarr
-plexdrive 
+plexdrive
 flexget
 aceplayer
 streama
-P2p-streamer
-P2p-player
+p2p-streamer
+p2p-player
 transmission-remote
-transmission-cli
 transmission-common
 rtorrent-screen
 deluge-console
