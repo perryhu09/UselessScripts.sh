@@ -1208,6 +1208,7 @@ main() {
 	disable_guest
 	set_all_user_passwords
 	log_action ""
+	lock_root_account
 
 	# 3. PASSWORD POLICIES
 	log_action "[ PHASE 3: PASSWORD POLICIES ]"
