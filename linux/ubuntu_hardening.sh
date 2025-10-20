@@ -232,6 +232,23 @@ set_all_user_passwords() {
 	log_action "All user passwords set to: Cyb3rPatr!0t"
 }
 
+lock_root_account() {
+	log_action "===Starting root account lock procedure==="
+	if id root &>/dev/null; then
+		if passwd -l root &>/dev/null; then
+			log_action "Root password locked successfully."
+		else
+			log_action "ERROR: Failed to lock root password."
+			return 1
+		fi
+		log_action "Root account lock procedure complete."
+	else
+		log_action "Root account not found."
+		return 1
+	fi
+}
+
+
 #===============================================
 # Password Policies 
 #===============================================
