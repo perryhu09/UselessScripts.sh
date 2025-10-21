@@ -274,9 +274,13 @@ configure_pam() {
 
   # minimim pwd len, limits consecutive repeated chars, require uppercase, lowercase, digit, special char
   # at least 3 chars diff from old password, can't contain username, and apply to root too
-  sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
+  # sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
 
-  log_action "Configured password complexity requirements"
+  if ! grep -q "pam_pwquality.so" /etc/pam.d/common-password; then
+    sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
+    log_action "Configured password complexity requirements"
+  fi
 
   # remember last 5 passwords so user can't use any last 5 old passwords
   if ! grep -q "remember=5" /etc/pam.d/common-password; then
