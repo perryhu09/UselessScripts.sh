@@ -299,8 +299,13 @@ configure_pam() {
     fi
   else
     if ! grep -q "pam_faillock" /etc/pam.d/common-auth; then
+      # Ensure faillock directory exists with proper permissions
+      mkdir -p /var/run/faillock 2>/dev/null
+      chmod 755 /var/run/faillock 2>/dev/null
+      log_action "Created faillock directory"
+
       sed -i '/pam_unix.so/i auth required pam_faillock.so preauth silent deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
-      sed -i '/pam_unix.so/a auth [default=die] pam_faillock.so authfail' /etc/pam.d/common-auth &>/dev/null
+      sed -i '/pam_unix.so/a auth sufficient pam_faillock.so authfail' /etc/pam.d/common-auth &>/dev/null
       log_action "Configured account lockout with pam_faillock (5 attempts, 30 min lockout)"
     fi
   fi

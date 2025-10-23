@@ -344,15 +344,17 @@ configure_pam() {
 
   # minimim pwd len, limits consecutive repeated chars, require uppercase, lowercase, digit, special char
   # at least 3 chars diff from old password, can't contain username, and apply to root too
+  # remove any existing pam_pwquality lines to avoid dup 
+  sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
+
   sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
 
   log_action "Configured password complexity requirements"
 
   # remember last 5 passwords so user can't use any last 5 old passwords
-  if ! grep -q "remember=5" /etc/pam.d/common-password; then
-    sed -i '/pam_unix.so/ s/$/ remember=5/' /etc/pam.d/common-password &>/dev/null
-    log_action "Configured password history (remember=5)"
-  fi
+  sed -i '/pam_unix.so/ s/remember=[0-9]\+//' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_unix.so/ s/$/ remember=5/' /etc/pam.d/common-password &>/dev/null
+  log_action "Configured password history (remember=5)"
 
   backup_file /etc/pam.d/common-auth
 
@@ -368,8 +370,14 @@ configure_pam() {
     fi
   else
     if ! grep -q "pam_faillock" /etc/pam.d/common-auth; then
+      # Ensure faillock directory exists with proper permissions
+      # faillock directory used for counting failed attempts
+      mkdir -p /var/run/faillock 2>/dev/null
+      chmod 755 /var/run/faillock 2>/dev/null
+      log_action "Created faillock directory"
+
       sed -i '/pam_unix.so/i auth required pam_faillock.so preauth silent deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
-      sed -i '/pam_unix.so/a auth [default=die] pam_faillock.so authfail' /etc/pam.d/common-auth &>/dev/null
+      sed -i '/pam_unix.so/a auth sufficient pam_faillock.so authfail' /etc/pam.d/common-auth &>/dev/null
       log_action "Configured account lockout with pam_faillock (5 attempts, 30 min lockout)"
     fi
   fi
