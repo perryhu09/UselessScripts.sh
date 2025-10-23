@@ -333,54 +333,29 @@ disallow_empty_passwords() {
 }
 
 configure_pam() {
-  log_action "=== CONFIGURING PAM PASSWORD COMPLEXITY ==="
+  log_action "=== CONFIGURING PAM: PWD COMPLEXITY, HISTORY, & ACCOUNT LOCKOUT=="
 
-  if ! dpkg -l | grep -q libpam-pwquality; then
-    log_action "Installing libpam-pwquality ..."
-    apt install -y libpam-pwquality &>/dev/null
-  fi
+  apt install -y libpam-pwquality &>/dev/null
 
   backup_file /etc/pam.d/common-password
 
-  # minimim pwd len, limits consecutive repeated chars, require uppercase, lowercase, digit, special char
-  # at least 3 chars diff from old password, can't contain username, and apply to root too
-  # remove any existing pam_pwquality lines to avoid dup 
   sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
-
   sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
-
   log_action "Configured password complexity requirements"
 
-  # remember last 5 passwords so user can't use any last 5 old passwords
-  sed -i '/pam_unix.so/ s/remember=[0-9]\+//' /etc/pam.d/common-password &>/dev/null
-  sed -i '/pam_unix.so/ s/$/ remember=5/' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_unix.so/i password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
   log_action "Configured password history (remember=5)"
 
   backup_file /etc/pam.d/common-auth
 
-  # Detect Ubuntu base version for Mint
-  UBUNTU_BASE_VERSION=$(detect_ubuntu_base_version)
-  log_action "Detected Ubuntu base version: $UBUNTU_BASE_VERSION (for PAM configuration)"
+  sed -i '/pam_unix.so/i auth required pam_faillock.so preauth silent deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
+  sed -i '/pam_unix.so/a auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
 
-  # Use pam_faillock for Ubuntu 22.04+ base, pam_tally2 for older
-  if [ -z "$UBUNTU_BASE_VERSION" ] || [ "$UBUNTU_BASE_VERSION" -lt 22 ]; then
-    if ! grep -q "pam_tally2" /etc/pam.d/common-auth; then
-      sed -i '1i auth required pam_tally2.so onerr=fail audit silent deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
-      log_action "Configured account lockout with pam_tally2 (5 attempts, 30 min lockout)"
-    fi
-  else
-    if ! grep -q "pam_faillock" /etc/pam.d/common-auth; then
-      # Ensure faillock directory exists with proper permissions
-      # faillock directory used for counting failed attempts
-      mkdir -p /var/run/faillock 2>/dev/null
-      chmod 755 /var/run/faillock 2>/dev/null
-      log_action "Created faillock directory"
+  backup_file /etc/pam.d/common-account
+  sed -i '1i account required pam_faillock.so' /etc/pam.d/common-account &>/dev/null
 
-      sed -i '/pam_unix.so/i auth required pam_faillock.so preauth silent deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
-      sed -i '/pam_unix.so/a auth sufficient pam_faillock.so authfail' /etc/pam.d/common-auth &>/dev/null
-      log_action "Configured account lockout with pam_faillock (5 attempts, 30 min lockout)"
-    fi
-  fi
+  log_action "Configured account lockout with pam_faillock (5 attempts, 30 min lockout)"
 }
 
 set_password_aging() {
