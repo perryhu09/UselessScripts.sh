@@ -40,27 +40,41 @@ backup_file() {
     log_action "Backed up $1"
   fi
 }
-
-# Detect Ubuntu base version for Linux Mint
-detect_ubuntu_base_version() {
-  # Check /etc/os-release for Ubuntu base codename
-  if [ -f /etc/os-release ]; then
-    local ubuntu_codename=$(grep "UBUNTU_CODENAME" /etc/os-release 2>/dev/null | cut -d= -f2)
-
-    if [ -n "$ubuntu_codename" ]; then
-      case "$ubuntu_codename" in
-        jammy)   echo "22" ;;  # Ubuntu 22.04 LTS (Mint 21.x)
-        focal)   echo "20" ;;  # Ubuntu 20.04 LTS (Mint 20.x)
-        bionic)  echo "18" ;;  # Ubuntu 18.04 LTS (Mint 19.x)
-        xenial)  echo "16" ;;  # Ubuntu 16.04 LTS (Mint 18.x)
-        *)       echo "22" ;;  # Default to 22 for newer versions
-      esac
-    else
-      # Fallback: try to detect from package versions or default to 22
-      echo "22"
-    fi
-  else
-    echo "22"
+#===============================================
+# Pre-Flight Checklist
+#===============================================
+preflight_check() {
+  echo "==============================================="
+  echo " HARDENING SCRIPT PRE-FLIGHT CHECK"
+  echo "==============================================="
+  echo ""
+  echo "WARNING: If not configured properly, this script will cause DESTRUCTIVE changes to your system!!!"
+  echo ""
+  echo "PRE-FLIGHT CHECKLIST - Have you completed ALL of these?"
+  echo "[] 1. Read the README and take notes"
+  echo "[] 2. Identified and added all AUTHORIZED_USERS from the README"
+  echo "[] 3. Identified and added all ADMIN_USERS (sudo) from the README"
+  echo "[] 4. Check the spelling for two lists above. (MUST DO THIS!!!! DUMBAHH CANT SPELL)"
+  echo "[] 5. Remove any required services from the README in service_blacklist.txt"
+  echo "[] 6. Remove any required packages from the README in packages_blacklist.txt"
+  echo ""
+  echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
+  echo ""
+  read -p "Have you completed ALL items on the checklist above? (print intials)" confirm1
+  if [[ ! "$confirm1" == "DH" ]]; then
+    echo ""
+    echo "Preflight check failed, complete the checklist before running this script"
+    echo "Edit the script and configure the AUTHORIZED_USERS and ADMIN_USERS arrays."
+    exit 1
+  fi
+  echo ""
+  echo "FINAL WARNING: Are you sure that you have completed everything in the checklist?"
+  echo ""
+  read -p "Type 'I UNDERSTAND' to proceed: " confirm2
+  if [[ "$confirm2" != "I UNDERSTAND" ]]; then
+      echo ""
+      echo "Confirmation failed. Exiting for saftey"
+      exit 1
   fi
 }
 
@@ -1259,18 +1273,13 @@ main() {
     exit 1
   fi
 
+  preflight_check
+
   log_action "======================================"
   log_action "STARTING LINUX MINT HARDENING SCRIPT"
   log_action "======================================"
   log_action "Timestamp: $(date)"
   log_action ""
-
-  # Detect Linux Mint and Ubuntu base version
-  if [ -f /etc/os-release ]; then
-    MINT_VERSION=$(grep "^VERSION=" /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')
-    MINT_CODENAME=$(grep "^VERSION_CODENAME=" /etc/os-release 2>/dev/null | cut -d= -f2)
-    log_action "Detected Linux Mint $MINT_VERSION ($MINT_CODENAME)"
-  fi
 
   # 1. SYSTEM UPDATES (Do this first for security patches)
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
