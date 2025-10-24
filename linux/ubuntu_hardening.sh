@@ -59,7 +59,7 @@ preflight_check() {
   echo "[] 5. Remove any required services from the README in service_blacklist.txt"
   echo "[] 6. Remove any required packages from the README in packages_blacklist.txt"
   echo ""
-  echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
+  echo "This script is ubuntu_hardening.sh, it is supposed to be run on UBUNTU LINUX"
   echo ""
   read -p "Have you completed ALL items on the checklist above? (print intials)" confirm1
   if [[ ! "$confirm1" == "DH" ]]; then
