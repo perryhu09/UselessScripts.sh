@@ -11,9 +11,6 @@ AUTHORIZED_USERS=()
 # Users with admin/sudo privileges
 ADMIN_USERS=()
 
-# System accounts that should remain disabled (???? <- CHECK THIS)
-SYSTEM_ACCOUNTS=()
-
 #===============================================
 # Utility Functions
 #===============================================
