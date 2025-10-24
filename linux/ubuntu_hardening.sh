@@ -19,7 +19,7 @@ SYSTEM_ACCOUNTS=()
 #===============================================
 # Set up log  directory and file
 if [ -n "$SUDO_USER" ]; then
-  ACTUAL_USER_HOME=$(getent password "$SUDO_USER" | cut -d: f6)
+  ACTUAL_USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
 else
   ACTUAL_USER_HOME="$HOME"
 fi
