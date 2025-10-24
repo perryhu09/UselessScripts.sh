@@ -18,7 +18,12 @@ SYSTEM_ACCOUNTS=()
 # Utility Functions
 #===============================================
 # Set up log  directory and file
-LOG_FILE="$HOME/Desktop/hardening.log"
+if [ -n "$SUDO_USER" ]; then
+  ACTUAL_USER_HOME=$(getent password "$SUDO_USER" | cut -d: f6)
+else
+  ACTUAL_USER_HOME="$HOME"
+fi
+LOG_FILE="$ACTUAL_USER_HOME/Desktop/hardening.log"
 
 # Logging Function
 log_action() {
