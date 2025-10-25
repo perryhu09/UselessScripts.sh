@@ -500,13 +500,12 @@ function antivirus_check {
 
 
 function disable_remote_services {
-    Write-Host "Disabling Remote services (Telnet, SSH, RDP, WinRM, Remote Registry, Remote Access, Remote Assistance)..."
+    Write-Host "Disabling Remote services (Telnet, SSH, WinRM, Remote Registry, Remote Access, Remote Assistance)..."
 
     # Services to disable: key = service short name, value = friendly name
     $servicesToDisable = @{
         'TlntSvr'        = 'Telnet Server'
         'sshd'           = 'OpenSSH Server'
-        'TermService'    = 'Remote Desktop Services (TermService)'
         'WinRM'          = 'Windows Remote Management (WinRM)'
         'RemoteRegistry' = 'Remote Registry'
         'RemoteAccess'   = 'Routing and Remote Access'
@@ -533,22 +532,42 @@ function disable_remote_services {
         }
     }
 
-    # Disable Remote Desktop and Remote Assistance connections via registry
+    # Ensure Remote Desktop Service (TermService) is enabled and running
+    try {
+        $term = Get-Service -Name 'TermService' -ErrorAction SilentlyContinue
+        if ($term) {
+            try {
+                Write-Host "Ensuring Remote Desktop Services (TermService) is set to Automatic and started..."
+                Set-Service -Name 'TermService' -StartupType Automatic -ErrorAction Stop
+                if ($term.Status -ne 'Running') {
+                    Start-Service -Name 'TermService' -ErrorAction Stop
+                }
+                Write-Host "Remote Desktop Services (TermService) is enabled and running."
+            } catch {
+                Write-Host "Warning: could not enable/start TermService: $($_.Exception.Message)"
+            }
+        } else {
+            Write-Host "Remote Desktop Service (TermService) not present on this system."
+        }
+    } catch {
+        Write-Host "Warning while ensuring TermService state: $_"
+    }
+
+    # Enable Remote Desktop connections via registry
     try {
         $rdpRegPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
         if (Test-Path $rdpRegPath) {
-            # Disable RDP
-            Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 1 -ErrorAction Stop
-            Write-Host "Remote Desktop (RDP) connections disabled via registry."
+            # Enable RDP
+            Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 0 -ErrorAction Stop
+            Write-Host "Remote Desktop (RDP) connections enabled via registry."
             
-            # Disable Remote Assistance
-            Set-ItemProperty -Path $rdpRegPath -Name 'fAllowToGetHelp' -Value 0 -ErrorAction Stop
-            Write-Host "Remote Assistance connections disabled via registry."
+            # (Leave Remote Assistance unchanged; if desired set fAllowToGetHelp)
         }
     } catch {
         Write-Host "Warning: Unable to modify remote connection registry settings: $_"
     }
 }
+
 function disable_additional_services {
     Write-Host "Disabling additional vulnerable services..."
 
@@ -558,18 +577,19 @@ function disable_additional_services {
         'ftpsvc',
         'SNMP',
         'SessionEnv',
-        'TermService',
-        'UmRdpService',
+        'UmRdpService',    # Note: UmRdpService removed from target list below in favor of preserving RDP functionality
         'SharedAccess',
         'RemoteRegistry',
         'SSDPSRV',
         'W3SVC',
         'SNMPTRAP',
         'RemoteAccess',
-        'RpcSs',
         'HomeGroupProvider',
         'HomeGroupListener'
     )
+
+    # Remove TermService and UmRdpService from disable list to avoid disabling RDP functionality
+    $servicesToDisable = $servicesToDisable | Where-Object { $_ -notin @('TermService','UmRdpService') }
 
     foreach ($service in $servicesToDisable) {
         $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
