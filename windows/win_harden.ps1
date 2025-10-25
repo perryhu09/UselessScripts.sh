@@ -163,7 +163,9 @@ function manageLocalGroups {
                             $list = $userRem -split '\s*,\s*' | Where-Object { $_ -ne '' }
                             try { Remove-LocalGroupMember -Group $group -Member $list -ErrorAction Stop; Write-Host "Removed: $($list -join ', ')" } catch { Write-Host "Error: $_" }
                         }
-                        'back' { break }
+                        'back' {
+                            break
+                        }
                         default { Write-Host "Unknown action." }
                     }
                 }
@@ -532,40 +534,102 @@ function disable_remote_services {
         }
     }
 
-    # Ensure Remote Desktop Service (TermService) is enabled and running
-    try {
-        $term = Get-Service -Name 'TermService' -ErrorAction SilentlyContinue
-        if ($term) {
-            try {
-                Write-Host "Ensuring Remote Desktop Services (TermService) is set to Automatic and started..."
+    # Ask user whether to disable Remote Desktop entirely
+    $resp = Read-Host "Disable Remote Desktop entirely? (Y/N)"
+    $disableRDP = $resp -match '^[Yy]'
+
+    # Registry path for enabling/disabling RDP
+    $rdpRegPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+
+    if ($disableRDP) {
+        Write-Host "Disabling Remote Desktop (RDP) as requested..."
+
+        # Stop and disable TermService
+        try {
+            $term = Get-Service -Name 'TermService' -ErrorAction SilentlyContinue
+            if ($term) {
+                if ($term.Status -ne 'Stopped') {
+                    Stop-Service -Name 'TermService' -Force -ErrorAction Stop
+                    Write-Host "Stopped Remote Desktop Services (TermService)."
+                }
+                Set-Service -Name 'TermService' -StartupType Disabled -ErrorAction Stop
+                Write-Host "Set TermService startup type to Disabled."
+            } else {
+                Write-Host "Remote Desktop Service (TermService) not present on this system."
+            }
+        } catch {
+            Write-Host "Warning: could not stop/disable TermService: $($_.Exception.Message)"
+        }
+
+        # Set registry to deny connections
+        try {
+            if (Test-Path $rdpRegPath) {
+                Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 1 -Type DWord -ErrorAction Stop
+                Write-Host "Remote Desktop connections disabled via registry (fDenyTSConnections=1)."
+            } else {
+                New-Item -Path $rdpRegPath -Force | Out-Null
+                Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 1 -Type DWord -ErrorAction Stop
+                Write-Host "Created registry path and disabled Remote Desktop (fDenyTSConnections=1)."
+            }
+        } catch {
+            Write-Host "Warning: Unable to set registry to disable Remote Desktop: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Host "Keeping/Enabling Remote Desktop (RDP)..."
+
+        # Ensure TermService is enabled and started
+        try {
+            $term = Get-Service -Name 'TermService' -ErrorAction SilentlyContinue
+            if ($term) {
                 Set-Service -Name 'TermService' -StartupType Automatic -ErrorAction Stop
                 if ($term.Status -ne 'Running') {
                     Start-Service -Name 'TermService' -ErrorAction Stop
                 }
-                Write-Host "Remote Desktop Services (TermService) is enabled and running."
-            } catch {
-                Write-Host "Warning: could not enable/start TermService: $($_.Exception.Message)"
+                Write-Host "Remote Desktop Services (TermService) set to Automatic and started."
+            } else {
+                Write-Host "Remote Desktop Service (TermService) not present on this system."
             }
-        } else {
-            Write-Host "Remote Desktop Service (TermService) not present on this system."
+        } catch {
+            Write-Host "Warning: could not enable/start TermService: $($_.Exception.Message)"
         }
-    } catch {
-        Write-Host "Warning while ensuring TermService state: $_"
+
+        # Set registry to allow connections
+        try {
+            if (Test-Path $rdpRegPath) {
+                Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 0 -Type DWord -ErrorAction Stop
+                Write-Host "Remote Desktop connections enabled via registry (fDenyTSConnections=0)."
+            } else {
+                New-Item -Path $rdpRegPath -Force | Out-Null
+                Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 0 -Type DWord -ErrorAction Stop
+                Write-Host "Created registry path and enabled Remote Desktop (fDenyTSConnections=0)."
+            }
+        } catch {
+            Write-Host "Warning: Unable to set registry to enable Remote Desktop: $($_.Exception.Message)"
+        }
     }
 
-    # Enable Remote Desktop connections via registry
-    try {
-        $rdpRegPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
-        if (Test-Path $rdpRegPath) {
-            # Enable RDP
-            Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 0 -ErrorAction Stop
-            Write-Host "Remote Desktop (RDP) connections enabled via registry."
-            
-            # (Leave Remote Assistance unchanged; if desired set fAllowToGetHelp)
+    # Always disable Remote Assistance connections (policy + standard path)
+    $raPaths = @(
+        'HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance',
+        'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
+    )
+
+    foreach ($path in $raPaths) {
+        try {
+            if (-not (Test-Path $path)) {
+                New-Item -Path $path -Force | Out-Null
+            }
+            # fAllowToGetHelp = 0 disables Remote Assistance; other flags set defensively
+            Set-ItemProperty -Path $path -Name 'fAllowToGetHelp' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $path -Name 'fAllowUnsolicited' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $path -Name 'fAllowFullControl' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+            Write-Host "Disabled Remote Assistance settings in $path (where present)."
+        } catch {
+            Write-Host "Warning: could not modify Remote Assistance settings at $path : $($_.Exception.Message)"
         }
-    } catch {
-        Write-Host "Warning: Unable to modify remote connection registry settings: $_"
     }
+
+    Write-Host "Remote services adjustment complete."
 }
 
 function disable_additional_services {
