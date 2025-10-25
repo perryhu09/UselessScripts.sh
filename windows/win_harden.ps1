@@ -362,15 +362,49 @@ function update_firefox {
     }
 }
 function firewall_status {
-    $firewallStatus = Get-NetFirewallProfile | Select-Object Name, Enabled
-    foreach ($fwProfile in $firewallStatus) {
-        if (-not $fwProfile.Enabled) {
-            Write-Host "Firewall profile '$($fwProfile.Name)' is disabled. Enabling now..."
-            Set-NetFirewallProfile -Profile $fwProfile.Name -Enabled True
+    # Ensure firewall profiles are enabled and default inbound action is Block
+    $profiles = Get-NetFirewallProfile -ErrorAction SilentlyContinue
+    foreach ($p in $profiles) {
+        if (-not $p.Enabled) {
+            Write-Host "Firewall profile '$($p.Name)' is disabled. Enabling now..."
+            try { Set-NetFirewallProfile -Name $p.Name -Enabled True -ErrorAction Stop } catch { Write-Host "Failed to enable $($p.Name): $($_.Exception.Message)" }
         } else {
-            Write-Host "Firewall profile '$($fwProfile.Name)' is already enabled."
+            Write-Host "Firewall profile '$($p.Name)' is already enabled."
+        }
+
+        if ($p.DefaultInboundAction -ne 'Block') {
+            Write-Host "Setting DefaultInboundAction to 'Block' for profile '$($p.Name)'..."
+            try { Set-NetFirewallProfile -Name $p.Name -DefaultInboundAction Block -ErrorAction Stop } catch { Write-Host "Failed to set DefaultInboundAction for $($p.Name): $($_.Exception.Message)" }
         }
     }
+
+    # Mitigation: block common unicast name-resolution response ports to reduce LLMNR/NetBIOS unicast replies
+    # Ports: LLMNR = 5355, NetBIOS Name/Datagram = 137/138
+    $ports = @(5355,137,138)
+    foreach ($dir in @('Inbound','Outbound')) {
+        foreach ($port in $ports) {
+            $ruleName = "Block-Unicast-UDP-$port-$dir"
+            if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
+                try {
+                    New-NetFirewallRule -DisplayName $ruleName `
+                                        -Direction $dir `
+                                        -Action Block `
+                                        -Protocol UDP `
+                                        -LocalPort $port `
+                                        -Profile Any `
+                                        -Description "Block UDP port $port to reduce unicast name-resolution responses (LLMNR/NetBIOS)" `
+                                        -ErrorAction Stop
+                    Write-Host "Created firewall rule: $ruleName"
+                } catch {
+                    Write-Host "Failed to create rule $($ruleName): $($_.Exception.Message)"
+                }
+            } else {
+                Write-Host "Firewall rule already exists: $ruleName"
+            }
+        }
+    }
+
+    Write-Host "Firewall profile checks and unicast-response mitigation completed."
 }
 
 function reset_passwords {
@@ -1079,6 +1113,75 @@ function remove_backdoors {
         Write-Host "No suspicious modifications detected for utilman/sethc/cmd in System32 (by heuristic)."
     }
 
+    # 7.5) Detect and remove 'Sticky Keys' / Ease-of-Access backdoor via IFEO 'Debugger' or other Image File Execution Options tricks
+    try {
+        $ifeoPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options'
+        $accessibilityTargets = @('sethc.exe','utilman.exe','osk.exe','magnify.exe')
+        $ifeoFindings = @()
+
+        foreach ($t in $accessibilityTargets) {
+            $keyPath = Join-Path $ifeoPath $t
+            if (Test-Path $keyPath) {
+                $dbg = (Get-ItemProperty -Path $keyPath -Name 'Debugger' -ErrorAction SilentlyContinue).Debugger
+                if ($dbg) {
+                    $ifeoFindings += [PSCustomObject]@{Key=$keyPath;Target=$t;Debugger=$dbg}
+                } else {
+                    # also check for other suspicious properties (e.g. ShellExecHooks or other remapping)
+                    $props = Get-ItemProperty -Path $keyPath -ErrorAction SilentlyContinue | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name -ErrorAction SilentlyContinue
+                    foreach ($p in $props) {
+                        if ($p -match 'Debugger|shell|hook|redirect' ) {
+                            $val = (Get-ItemProperty -Path $keyPath -Name $p -ErrorAction SilentlyContinue).$p
+                            if ($val) { $ifeoFindings += [PSCustomObject]@{Key=$keyPath;Target=$t;Property=$p;Value=$val} }
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($ifeoFindings.Count -gt 0) {
+            Write-Host "Image File Execution Options backdoor entries detected for accessibility executables:"
+            $ifeoFindings | ForEach-Object {
+                if ($_.Debugger) {
+                    Write-Host (" - {0} -> Debugger: {1}" -f $_.Target, $_.Debugger)
+                } else {
+                    Write-Host (" - {0} -> {1} = {2}" -f $_.Target, $_.Property, $_.Value)
+                }
+            }
+
+            if ($Force -or (Read-Host "Remove Debugger/IFEO entries for accessibility backdoors? (Y/N)" ) -match '^[Yy]') {
+                foreach ($e in $ifeoFindings) {
+                    try {
+                        # Remove the Debugger value if present, otherwise remove the suspicious property
+                        if ((Get-ItemProperty -Path $e.Key -Name 'Debugger' -ErrorAction SilentlyContinue).Debugger) {
+                            Remove-ItemProperty -Path $e.Key -Name 'Debugger' -ErrorAction Stop
+                            Write-Host "Removed Debugger for $($e.Target)"
+                        } else {
+                            if ($e.Property) {
+                                Remove-ItemProperty -Path $e.Key -Name $e.Property -ErrorAction Stop
+                                Write-Host "Removed $($e.Property) for $($e.Target)"
+                            }
+                        }
+
+                        # If the IFEO key is now empty, remove the key itself
+                        $remaining = Get-ItemProperty -Path $e.Key -ErrorAction SilentlyContinue | Get-Member -MemberType NoteProperty | Select-Object -ExpandProperty Name -ErrorAction SilentlyContinue
+                        if (-not $remaining -or $remaining.Count -eq 0) {
+                            Remove-Item -Path $e.Key -Force -ErrorAction SilentlyContinue
+                            Write-Host "Removed empty IFEO key: $($e.Key)"
+                        }
+                    } catch {
+                        Write-Host "Failed to remove IFEO entry $($e.Key): $($_.Exception.Message)"
+                    }
+                }
+            } else {
+                Write-Host "IFEO backdoor entries left in place per user request."
+            }
+        } else {
+            Write-Host "No IFEO 'Debugger' backdoor entries found for accessibility executables."
+        }
+    } catch {
+        Write-Host "Error while inspecting Image File Execution Options: $($_.Exception.Message)"
+    }
+
     # 8) Stop/remove netcat-like binaries and processes explicitly (extra pass)
     try {
         $ncProcs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(nc|netcat|ncat)$' }
@@ -1242,12 +1345,22 @@ function remove_unapproved_third_party_apps {
     }
     $fileTargets = $fileTargets | Sort-Object -Property Path -Unique
 
+    # 3.5) Find .ps1 files (PowerShell scripts) in candidate roots (user is asked if they are needed)
+    $ps1Files = @()
+    foreach ($root in $candidateRoots) {
+        try {
+            $ps1Files += Get-ChildItem -Path $root -Filter '*.ps1' -Recurse -File -Force -ErrorAction SilentlyContinue
+        } catch {}
+    }
+    $ps1Files = $ps1Files | Sort-Object -Property FullName -Unique
+
     # Summary
     Write-Host ""
     Write-Host "Summary of findings:"
     Write-Host (" - Media files to remove: {0}" -f $mediaFiles.Count)
     Write-Host (" - Installed program entries matching patterns: {0}" -f $matchedPrograms.Count)
     Write-Host (" - Files/folders matching patterns: {0}" -f $fileTargets.Count)
+    Write-Host (" - PowerShell scripts (.ps1) found: {0}" -f $ps1Files.Count)
     Write-Host ""
 
     if (-not $Force) {
@@ -1320,73 +1433,40 @@ function remove_unapproved_third_party_apps {
         }
     }
 
-    Write-Host "Removal pass complete. Manual verification recommended for remaining artifacts."
-}
+    # 8) Prompt about .ps1 files (ask if they are needed). If Force provided, delete without prompt.
+    if ($ps1Files.Count -gt 0) {
+        Write-Host ""
+        Write-Host "PowerShell scripts discovered (.ps1):"
+        # show up to first 20 for review
+        $ps1Files | Select-Object -First 20 | ForEach-Object { Write-Host " - $($_.FullName)" }
+        if ($ps1Files.Count -gt 20) { Write-Host " - ... and $($ps1Files.Count - 20) more" }
 
-function remove_unauthorized_services {
-    param(
-        [switch]$Force,
-        [string[]]$AuthorizedServices,
-        [string[]]$UnauthorizedPatterns = @('apache','httpd','tomcat')
-    )
-
-    Write-Host "Scanning services for Apache and other unauthorized services..."
-
-    $allServices = Get-Service -ErrorAction SilentlyContinue
-
-    # 1) Services that explicitly match known unauthorized patterns (apache/httpd/tomcat)
-    $patternMatches = @()
-    foreach ($pat in $UnauthorizedPatterns) {
-        $patternMatches += $allServices | Where-Object { $_.Name -imatch $pat -or $_.DisplayName -imatch $pat }
-    }
-    $patternMatches = $patternMatches | Sort-Object -Property Name -Unique
-
-    # 2) If an authorized whitelist is provided, any service not in the whitelist is considered unauthorized
-    $whitelistMatches = @()
-    if ($AuthorizedServices -and $AuthorizedServices.Count -gt 0) {
-        $whitelistMatches = $allServices | Where-Object {
-            -not ($AuthorizedServices -contains $_.Name) -and -not ($AuthorizedServices -contains $_.DisplayName)
+        $deletePs1 = $false
+        if ($Force) {
+            $deletePs1 = $true
+        } else {
+            # Ask user whether these scripts are needed. If user answers N, we remove them.
+            $resp = Read-Host "Are these .ps1 scripts needed? Answer Y to keep them, N to delete (Y/N)"
+            if ($resp -match '^[Nn]') { $deletePs1 = $true } else { $deletePs1 = $false }
         }
-    }
 
-    $targets = @($patternMatches + $whitelistMatches) | Sort-Object -Property Name -Unique
-
-    if (-not $targets -or $targets.Count -eq 0) {
-        Write-Host "No apache or unauthorized services found."
-        return
-    }
-
-    Write-Host "Services identified for removal:"
-    $targets | ForEach-Object { Write-Host " - $($_.Name) : $($_.DisplayName) (State: $($_.Status))" }
-
-    if (-not $Force) {
-        $confirm = Read-Host "Stop and delete these services? (Y/N)"
-        if ($confirm -notmatch '^[Yy]') {
-            Write-Host "Aborting per user request."
-            return
-        }
-    }
-
-    foreach ($svc in $targets) {
-        try {
-            if ($svc.Status -ne 'Stopped') {
-                Write-Host "Stopping service $($svc.Name)..."
-                Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue
+        if ($deletePs1) {
+            foreach ($s in $ps1Files) {
+                try {
+                    if (Test-Path $s.FullName) {
+                        Remove-Item -LiteralPath $s.FullName -Force -ErrorAction Stop
+                        Write-Host "Deleted .ps1: $($s.FullName)"
+                    }
+                } catch {
+                    Write-Host "Failed to delete $($s.FullName) : $($_.Exception.Message)"
+                }
             }
-        } catch {
-            Write-Host "Warning: failed to stop $($svc.Name): $($_.Exception.Message)"
-        }
-
-        try {
-            Write-Host "Deleting service $($svc.Name)..."
-            sc.exe delete $svc.Name | Out-Null
-            Write-Host "Deleted service $($svc.Name)"
-        } catch {
-            Write-Host "Failed to delete $($svc.Name): $($_.Exception.Message)"
+        } else {
+            Write-Host "Leaving .ps1 scripts in place per user selection."
         }
     }
 
-    Write-Host "Service removal pass complete."
+    Write-Host "Removal pass complete. Manual verification recommended for remaining artifacts."
 }
 
 
@@ -1589,7 +1669,7 @@ function enforce_domain_hardening {
         $results.Add("Error checking LDAP signing setting: $($_.Exception.Message)") | Out-Null
     }
 
-    #
+    #c
     # 4) Domain logons are not cached to disk on members (CachedLogonsCount = 0)
     #
     try {
@@ -1883,7 +1963,6 @@ function harden_defender_and_exploit_protection {
 
     Write-Host "Defender & Exploit Protection hardening pass complete. Review output for any manual actions required."
 }
-
 ########################################################################
 # Execute Functions
 ########################################################################
