@@ -303,20 +303,6 @@ disallow_empty_passwords() {
 }
 
 configure_pam() {
-  log_action "=== DISALLOWING EMPTY PASSWORDS ==="
-  backup_file /etc/pam.d/common-auth
-
-  if grep -q "nullok" /etc/pam.d/common-auth; then
-    sed -i 's/nullok//g' /etc/pam.d/common-auth
-    log_action "Removed nullok from common-auth"
-  else
-    log_action "No nullok found in common-auth"
-  fi
-
-  log_action "Disallowed empty user passwords"
-}
-
-configure_pam() {
   log_action "=== CONFIGURING PAM: PWD COMPLEXITY, HISTORY, & ACCOUNT LOCKOUT=="
 
   apt install -y libpam-pwquality &>/dev/null
