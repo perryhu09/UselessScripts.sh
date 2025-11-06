@@ -598,25 +598,35 @@ function set_lockout_policy {
 function secure_password_policy {
     Write-Host "Configuring secure password policies..."
     try {
-        # Set minimum password length
+        # Set minimum password length / ages / history using net accounts (legacy but effective)
         net accounts /minpwlen:13
-        
-        # Set maximum password age
         net accounts /maxpwage:90
-        
-        # Set minimum password age
         net accounts /minpwage:15
-        
-        # Set password history
         net accounts /uniquepw:7
-        
-        # Enable password complexity
-        $secEditPath = "$env:TEMP\securitypolicy.cfg"
-        "PasswordComplexity = 1" | Out-File $secEditPath
-        secedit /configure /db c:\windows\security\local.sdb /cfg $secEditPath /areas SECURITYPOLICY
-        Remove-Item $secEditPath -ErrorAction SilentlyContinue
 
-        Write-Host "Password policies have been configured successfully."
+        # Build a secedit INF to enforce PasswordComplexity and disable reversible encryption (ClearTextPassword = 0)
+        $secEditPath = Join-Path $env:TEMP "securitypolicy.inf"
+        $inf = @"
+[Unicode]
+Unicode=yes
+[System Access]
+PasswordComplexity = 1
+ClearTextPassword = 0
+
+[Version]
+signature="$CHICAGO$"
+Revision=1
+"@ 
+
+        # Write INF as ASCII (secedit expects ANSI/ASCII)
+        $inf | Out-File -FilePath $secEditPath -Encoding ASCII -Force
+
+        # Apply the policy section containing System Access settings
+        secedit.exe /configure /db "$env:windir\security\database\local.sdb" /cfg $secEditPath /areas SECURITYPOLICY | Out-Null
+
+        Remove-Item -Path $secEditPath -ErrorAction SilentlyContinue
+
+        Write-Host "Password policies have been configured successfully. Reversible encryption for stored passwords disabled (ClearTextPassword=0)."
     }
     catch {
         Write-Host "Error configuring password policies: $_"
@@ -650,11 +660,14 @@ function enable_critical_services {
         'Netlogon' = 'Automatic'
         'W32Time' = 'Automatic'
 
+        # DNS Server (ensure DNS service is enabled on DNS servers)
+        'DNS' = 'Automatic'
+
         # Optional Services
         'AppIDSvc' = 'Manual'
         'Appinfo' = 'Manual'
         'SysMain' = 'Automatic'
-        'NlaSvc' = 'Automatic'
+        'NlaSvc' = 'Automatic'   
     }
 
     foreach ($service in $servicesToEnable.Keys) {
@@ -662,8 +675,10 @@ function enable_critical_services {
             $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
             if ($svc) {
                 Set-Service -Name $service -StartupType $servicesToEnable[$service]
-                Start-Service -Name $service -ErrorAction SilentlyContinue
-                Write-Host "Enabled and started $service"
+                if ($svc.Status -ne 'Running') {
+                    Start-Service -Name $service -ErrorAction SilentlyContinue
+                }
+                Write-Host "Enabled and started $service (StartupType=$($servicesToEnable[$service]))"
             } else {
                 Write-Host "Service $service not found"
             }
@@ -681,17 +696,12 @@ function secure_registry_settings {
     # Disable Automatic Admin logon
     try { Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" -Name "AutoAdminLogon" -Value 0 -Type DWord -ErrorAction Stop } catch { Write-Host "Warning: $($_)" }
 
-    # Set logon message
-    $body = Read-Host "Please enter logon text"
     try { Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName" -Name "Dummy" -Value $null -ErrorAction SilentlyContinue } catch {}
     try { Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName" -Name "Dummy" -Value $null -ErrorAction SilentlyContinue } catch {}
     try { Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name "Dummy" -Value $null -ErrorAction SilentlyContinue } catch {}
     try { Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName" -Name "Dummy" -Value $null -ErrorAction SilentlyContinue } catch {}
 
     try { Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "Dummy" -Value $null -ErrorAction SilentlyContinue } catch {}
-    try {
-        Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "LegalNoticeText" -Value $body -ErrorAction SilentlyContinue
-    } catch {}
 
     $subject = Read-Host "Please enter the title of the message"
     try { Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" -Name "LegalNoticeCaption" -Value $subject -ErrorAction SilentlyContinue } catch {}
@@ -807,7 +817,87 @@ function remove_third_party_apps {
             Write-Host "Query error: $($_.Exception.Message)"
         }
     }
-    
+}
+
+function stop-DefaultSharedFolders {
+    param(
+        [switch]$Force
+    )
+
+    # Require elevation
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "This operation requires administrative privileges. Re-run in an elevated session." 
+        return
+    }
+
+    Write-Host "Enumerating shares..."
+
+    # Preferred enumeration via SMB cmdlets; fallback to WMI
+    if (Get-Command -Name Get-SmbShare -ErrorAction SilentlyContinue) {
+        $allShares = Get-SmbShare -ErrorAction SilentlyContinue
+    } else {
+        $allShares = Get-WmiObject -Class Win32_Share -ErrorAction SilentlyContinue | ForEach-Object {
+            [PSCustomObject]@{ Name = $_.Name; Path = $_.Path; Type = $_.Type }
+        }
+    }
+
+    if (-not $allShares) {
+        Write-Host "No shares found or unable to enumerate shares."
+        return
+    }
+
+    # Typical admin/default shares to stop: ADMIN$, IPC$, drive-letter$ (C$, D$, ...)
+    $candidates = $allShares | Where-Object {
+        $_.Name -match '^(ADMIN\$|IPC\$|[A-Z]\$)$'
+    } | Sort-Object -Property Name -Unique
+
+    if (-not $candidates -or $candidates.Count -eq 0) {
+        Write-Host "No default/admin shares (ADMIN$, IPC$, X$) detected."
+        return
+    }
+
+    Write-Host "Shares identified for removal:"
+    $candidates | ForEach-Object { Write-Host " - $($_.Name)" }
+
+    if (-not $Force) {
+        $confirm = Read-Host "Stop sharing these? (Y/N)"
+        if ($confirm -notmatch '^[Yy]') {
+            Write-Host "Aborting per user request."
+            return
+        }
+    }
+
+    foreach ($s in $candidates) {
+        $name = $s.Name
+        try {
+            if (Get-Command -Name Remove-SmbShare -ErrorAction SilentlyContinue) {
+                Remove-SmbShare -Name $name -Force -ErrorAction Stop
+                Write-Host "Removed SMB share: $name"
+            } else {
+                # Fallback to net share delete
+                & net share $name /delete | Out-Null
+                Write-Host "Requested removal via 'net share' for: $name"
+            }
+        } catch {
+            Write-Host "Failed to remove $($name): $($_.Exception.Message)"
+        }
+    }
+
+    # Prevent automatic recreation of administrative shares (requires reboot)
+    try {
+        $regPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters'
+        if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
+
+        # AutoShareServer (Server OS) and AutoShareWks (Workstation OS)
+        Set-ItemProperty -Path $regPath -Name 'AutoShareServer' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $regPath -Name 'AutoShareWks' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+
+        Write-Host "Set AutoShareServer/AutoShareWks to 0 to prevent automatic recreation. A reboot may be required."
+    } catch {
+        Write-Host "Unable to write registry to disable auto-shares: $($_.Exception.Message)"
+    }
+
+    Write-Host "Operation complete. Verify Shares in Computer Management -> Shared Folders if needed."
 }
 
 function main {
@@ -825,6 +915,7 @@ function main {
     secure_password_policy
     enable_critical_services
     secure_registry_settings
-    remove_third_party_apps
+    remove_third_party_apps 
+    stop-DefaultSharedFolders
 }
 main

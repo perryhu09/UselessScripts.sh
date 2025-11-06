@@ -713,25 +713,35 @@ function set_lockout_policy {
 function secure_password_policy {
     Write-Host "Configuring secure password policies..."
     try {
-        # Set minimum password length
+        # Set minimum password length / ages / history using net accounts (legacy but effective)
         net accounts /minpwlen:13
-        
-        # Set maximum password age
         net accounts /maxpwage:90
-        
-        # Set minimum password age
         net accounts /minpwage:15
-        
-        # Set password history
         net accounts /uniquepw:7
-        
-        # Enable password complexity
-        $secEditPath = "$env:TEMP\securitypolicy.cfg"
-        "PasswordComplexity = 1" | Out-File $secEditPath
-        secedit /configure /db c:\windows\security\local.sdb /cfg $secEditPath /areas SECURITYPOLICY
-        Remove-Item $secEditPath -ErrorAction SilentlyContinue
 
-        Write-Host "Password policies have been configured successfully."
+        # Build a secedit INF to enforce PasswordComplexity and disable reversible encryption (ClearTextPassword = 0)
+        $secEditPath = Join-Path $env:TEMP "securitypolicy.inf"
+        $inf = @"
+[Unicode]
+Unicode=yes
+[System Access]
+PasswordComplexity = 1
+ClearTextPassword = 0
+
+[Version]
+signature="$CHICAGO$"
+Revision=1
+"@ 
+
+        # Write INF as ASCII (secedit expects ANSI/ASCII)
+        $inf | Out-File -FilePath $secEditPath -Encoding ASCII -Force
+
+        # Apply the policy section containing System Access settings
+        secedit.exe /configure /db "$env:windir\security\database\local.sdb" /cfg $secEditPath /areas SECURITYPOLICY | Out-Null
+
+        Remove-Item -Path $secEditPath -ErrorAction SilentlyContinue
+
+        Write-Host "Password policies have been configured successfully. Reversible encryption for stored passwords disabled (ClearTextPassword=0)."
     }
     catch {
         Write-Host "Error configuring password policies: $_"
