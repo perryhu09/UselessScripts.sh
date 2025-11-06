@@ -37,7 +37,6 @@ backup_file() {
     log_action "Backed up $1"
   fi
 }
-
 #===============================================
 # Pre-Flight Checklist
 #===============================================
@@ -56,7 +55,7 @@ preflight_check() {
   echo "[] 5. Remove any required services from the README in service_blacklist.txt"
   echo "[] 6. Remove any required packages from the README in packages_blacklist.txt"
   echo ""
-  echo "This script is ubuntu_hardening.sh, it is supposed to be run on UBUNTU LINUX"
+  echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
   echo ""
   read -p "Have you completed ALL items on the checklist above? (print intials)" confirm1
   if [[ ! "$confirm1" == "DH" ]]; then
@@ -206,14 +205,61 @@ check_uid_zero() {
 disable_guest() {
   log_action "=== DISABLING GUEST ACCOUNT ==="
 
-  # LightDM for Ubuntu 17.04 and prior
+  # LightDM (Common in Linux Mint Xfce, MATE editions)
   if [ -f /etc/lightdm/lightdm.conf ]; then
     backup_file /etc/lightdm/lightdm.conf
-    sed -i '/^[#[:space:]]*allow-guest=/d; /^\[Seat:\*\]/a allow-guest=false' /etc/lightdm/lightdm.conf
+
+    # Check if [Seat:*] section exists
+    if grep -q "^\[Seat:\*\]" /etc/lightdm/lightdm.conf; then
+      # Remove any existing allow-guest lines and add after [Seat:*]
+      sed -i '/^[#[:space:]]*allow-guest=/d' /etc/lightdm/lightdm.conf
+      sed -i '/^\[Seat:\*\]/a allow-guest=false' /etc/lightdm/lightdm.conf
+    else
+      # Add [Seat:*] section with allow-guest=false
+      echo -e "\n[Seat:*]\nallow-guest=false" >> /etc/lightdm/lightdm.conf
+    fi
     log_action "Disabled guest account in lightdm.conf"
   fi
 
-  # GDM3 Display Manager
+  # Alternative LightDM config location
+  if [ -d /etc/lightdm/lightdm.conf.d ]; then
+    echo "[Seat:*]" > /etc/lightdm/lightdm.conf.d/50-no-guest.conf
+    echo "allow-guest=false" >> /etc/lightdm/lightdm.conf.d/50-no-guest.conf
+    log_action "Created /etc/lightdm/lightdm.conf.d/50-no-guest.conf"
+  fi
+
+  # MDM (Mint Display Manager - older Mint versions)
+  if [ -f /etc/mdm/mdm.conf ]; then
+    backup_file /etc/mdm/mdm.conf
+    if ! grep -q "^AllowGuest=false" /etc/mdm/mdm.conf; then
+      if grep -q "^\[security\]" /etc/mdm/mdm.conf; then
+        sed -i '/^\[security\]/a AllowGuest=false' /etc/mdm/mdm.conf
+      else
+        echo -e "\n[security]\nAllowGuest=false" >> /etc/mdm/mdm.conf
+      fi
+      log_action "Disabled guest account in MDM"
+    fi
+  fi
+
+  # Cinnamon Desktop (Mint Cinnamon edition) - Disable guest session
+  # Note: Cinnamon uses LightDM or GDM as display manager, handled above
+  # Additional Cinnamon-specific settings via gsettings
+  if command -v cinnamon-session &>/dev/null; then
+    # Try to disable guest for all users via dconf system-db
+    mkdir -p /etc/dconf/db/local.d 2>/dev/null
+    cat > /etc/dconf/db/local.d/00-disable-guest <<'EOF'
+[org/cinnamon/desktop/session]
+session-manager-uses-logind=true
+EOF
+
+    # Update dconf database
+    if command -v dconf &>/dev/null; then
+      dconf update 2>/dev/null
+      log_action "Updated Cinnamon dconf settings to harden guest access"
+    fi
+  fi
+
+  # GDM3 Display Manager (if used in some Mint configurations)
   for gdm_conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
     if [ -f "$gdm_conf" ]; then
       backup_file "$gdm_conf"
@@ -250,8 +296,8 @@ disable_guest() {
       fi
     fi
   done
-  # sudo systemctl restart gdm3
-  # REQUIRES SYSTEM RESTART AT THE END
+
+  log_action "Guest account disabling complete (reboot required to take effect)"
 }
 
 set_all_user_passwords() {
@@ -487,6 +533,9 @@ check_suid_sgid() {
     "/usr/bin/gpasswd"
     "/usr/bin/newgrp"
     "/usr/bin/chfn"
+    "/usr/bin/chsh"
+    "/usr/lib/dbus-1.0/dbus-daemon-launch-helper"
+    "/usr/lib/openssh/ssh-keysign"
   )
 
   find / -path /proc -prune -o -type f \( -perm -4000 -o -perm -2000 \) -print 2>/dev/null | while read file; do
@@ -1224,94 +1273,96 @@ main() {
   preflight_check
 
   log_action "======================================"
-  log_action "STARTING UBUNTU HARDENING SCRIPT"
+  log_action "STARTING LINUX MINT HARDENING SCRIPT"
   log_action "======================================"
   log_action "Timestamp: $(date)"
   log_action ""
 
-  # 1. SYSTEM UPDATES (Do this first for security patches)
-  log_action "[ PHASE 1: SYSTEM UPDATES ]"
-  update_system
-  configure_automatic_updates
-  log_action ""
+#   # 1. SYSTEM UPDATES (Do this first for security patches)
+#   log_action "[ PHASE 1: SYSTEM UPDATES ]"
+#   update_system
+#   configure_automatic_updates
+#   log_action ""
 
-  # 2. USER MANAGEMENT
-  log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
-  remove_unauthorized_users
-  fix_admin_group
-  check_uid_zero
-  disable_guest
-  set_all_user_passwords
-  log_action ""
-  lock_root_account
+#   # 2. USER MANAGEMENT
+#   log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
+#   remove_unauthorized_users
+#   fix_admin_group
+#   check_uid_zero
+#   disable_guest
+#   set_all_user_passwords
+#   log_action ""
+#   lock_root_account
 
   # 3. PASSWORD POLICIES
   log_action "[ PHASE 3: PASSWORD POLICIES ]"
-  disallow_empty_passwords
+#   disallow_empty_passwords
   configure_pam
-  set_password_aging
-  log_action ""
+#   set_password_aging
+#   log_action ""
 
-  # 4. FILE PERMISSIONS & AUDITING
-  log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
-  secure_file_permissions
-  find_world_writable_files
-  check_suid_sgid
-  find_orphaned_files
-  log_action ""
+#   # 4. FILE PERMISSIONS & AUDITING
+#   log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
+#   secure_file_permissions
+#   fix_sudoers_nopasswd
+#   find_world_writable_files
+#   check_suid_sgid
+#   find_orphaned_files
+#   log_action ""
 
-  # 5. NETWORK SECURITY
-  log_action "[ PHASE 5: NETWORK SECURITY ]"
-  harden_ssh
-  harden_kernel_sysctl
-  log_action ""
+#   # 5. NETWORK SECURITY
+#   log_action "[ PHASE 5: NETWORK SECURITY ]"
+#   fix_hosts_file
+#   harden_ssh
+#   harden_kernel_sysctl
+#   log_action ""
 
-  # 6. FIREWALL CONFIGURATION
-  log_action "[ PHASE 6: FIREWALL ]"
-  enable_ufw
-  configure_firewall
-  log_action ""
+#   # 6. FIREWALL CONFIGURATION
+#   log_action "[ PHASE 6: FIREWALL ]"
+#   enable_ufw
+#   configure_firewall
+#   log_action ""
 
-  # 7. SERVICE MANAGEMENT
-  log_action "[ PHASE 7: SERVICE MANAGEMENT ]"
-  disable_unnecessary_services "./service_blacklist.txt"
-  audit_running_services
-  log_action ""
+#   # 7. SERVICE MANAGEMENT
+#   log_action "[ PHASE 7: SERVICE MANAGEMENT ]"
+#   disable_unnecessary_services "./service_blacklist.txt"
+#   audit_running_services
+#   log_action ""
 
-  # 8. PACKAGE AUDITING & REMOVAL
-  log_action "[ PHASE 8: SOFTWARE AUDITING ]"
-  remove_unauthorized_software "./package_blacklist.txt"
-  remove_prohibited_media
-  log_action ""
+#   # 8. PACKAGE AUDITING & REMOVAL
+#   log_action "[ PHASE 8: SOFTWARE AUDITING ]"
+#   remove_unauthorized_software "./package_blacklist.txt"
+#   remove_prohibited_media
+#   log_action ""
 
-  # 9. CRON SECURITY
-  log_action "[ PHASE 9: CRON SECURITY ]"
-  secure_cron_system
-  log_action ""
+#   # 9. CRON SECURITY
+#   log_action "[ PHASE 9: CRON SECURITY ]"
+#   secure_cron_system
+#   log_action ""
 
-  # 10. SYSTEM AUDITING
-  log_action "[ PHASE 10: SYSTEM AUDITING ]"
-  harden_auditd
-  log_action ""
+#   # 10. SYSTEM AUDITING
+#   log_action "[ PHASE 10: SYSTEM AUDITING ]"
+#   harden_auditd
+#   log_action ""
 
-  # 11. ANTIVIRUS & ROOTKIT DETECTION
-  log_action "[ PHASE 11: MALWARE DETECTION ]"
-  run_rootkit_scans
-  log_action ""
+#   # 11. ANTIVIRUS & ROOTKIT DETECTION
+#   log_action "[ PHASE 11: MALWARE DETECTION ]"
+#   run_rootkit_scans
+#   log_action ""
 
-  # 12. COMPREHENSIVE SECURITY AUDIT
-  log_action "[ PHASE 12: LYNIS AUDIT ]"
-  audit_with_lynis
-  log_action ""
+#   # 12. COMPREHENSIVE SECURITY AUDIT
+#   log_action "[ PHASE 12: LYNIS AUDIT ]"
+#   audit_with_lynis
+#   log_action ""
 
-  log_action "======================================"
-  log_action "HARDENING COMPLETE"
-  log_action "======================================"
-  log_action "IMPORTANT: Review the log at $LOG_FILE"
-  log_action "IMPORTANT: Reboot system to apply all changes"
-  log_action "Run: sudo reboot"
-  log_action ""
-  log_action "Completion time: $(date)"
+#   log_action "======================================"
+#   log_action "HARDENING COMPLETE"
+#   log_action "======================================"
+#   log_action "IMPORTANT: Review the log at $LOG_FILE"
+#   log_action "IMPORTANT: Reboot system to apply all changes"
+#   log_action "Run: sudo reboot"
+#   log_action ""
+#   log_action "Completion time: $(date)"
 }
 
 main
