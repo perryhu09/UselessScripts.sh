@@ -58,7 +58,7 @@ preflight_check() {
   echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
   echo ""
   read -p "Have you completed ALL items on the checklist above? (print intials)" confirm1
-  if [[ ! "$confirm1" == "DH" ]]; then
+  if [[ ! "$confirm1" == "NP" ]]; then
     echo ""
     echo "Preflight check failed, complete the checklist before running this script"
     echo "Edit the script and configure the AUTHORIZED_USERS and ADMIN_USERS arrays."
@@ -93,6 +93,15 @@ update_system() {
 
   apt autoclean -y -qq &>/dev/null
   log_action "Cleaned package cache"
+}
+
+update_packages() {
+  log_action "Updating Unique list of Packages"
+  while IFS = read -r line; do
+    apt-get install -y -qq "$line" &>/dev/null
+    log_action "Installed/Updated package: $line"
+  done < updatePackages.txt
+  log_action "Finished Package Updates"
 }
 
 configure_automatic_updates() {
@@ -1412,6 +1421,7 @@ main() {
   # 1. SYSTEM UPDATES (Do this first for security patches)
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
   update_system
+  update_packages
   configure_automatic_updates
   log_action ""
 
