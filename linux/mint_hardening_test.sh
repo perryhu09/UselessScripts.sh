@@ -1453,94 +1453,95 @@ main() {
   log_action "Timestamp: $(date)"
   log_action ""
 
-  # 1. SYSTEM UPDATES (Do this first for security patches)
-  log_action "[ PHASE 1: SYSTEM UPDATES ]"
-  update_system
-  update_packages
-  configure_automatic_updates
-  log_action ""
+  # # 1. SYSTEM UPDATES (Do this first for security patches)
+  # log_action "[ PHASE 1: SYSTEM UPDATES ]"
+  # update_system
+  # update_packages
+  # configure_automatic_updates
+  # log_action ""
 
-  # 2. USER MANAGEMENT
-  log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
-  remove_unauthorized_users
-  fix_admin_group
-  check_uid_zero
-  disable_guest
-  set_all_user_passwords
-  log_action ""
-  lock_root_account
-  tighten_sudo_defaults
+  # # 2. USER MANAGEMENT
+  # log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
+  # remove_unauthorized_users
+  # fix_admin_group
+  # check_uid_zero
+  # disable_guest
+  # set_all_user_passwords
+  # log_action ""
+  # lock_root_account
+  # tighten_sudo_defaults
 
   # 3. PASSWORD POLICIES
-  log_action "[ PHASE 3: PASSWORD POLICIES ]"
-  disallow_empty_passwords
+  #log_action "[ PHASE 3: PASSWORD POLICIES ]"
+  #disallow_empty_passwords
   configure_pwquality_conf
   configure_pam
-  set_password_aging
-  log_action ""
+  #set_password_aging
+  #log_action ""
 
-  # 4. FILE PERMISSIONS & AUDITING
-  log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
-  secure_file_permissions
-  fix_sudoers_nopasswd
-  find_world_writable_files
-  check_suid_sgid
-  find_orphaned_files
-  log_action ""
+  # # 4. FILE PERMISSIONS & AUDITING
+  # log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
+  # secure_file_permissions
+  # fix_sudoers_nopasswd
+  # find_world_writable_files
+  # check_suid_sgid
+  # find_orphaned_files
+  # log_action ""
 
-  # 5. NETWORK SECURITY
-  log_action "[ PHASE 5: NETWORK SECURITY ]"
-  fix_hosts_file
-  harden_ssh
-  harden_kernel_sysctl
-  log_action ""
+  # # 5. NETWORK SECURITY
+  # log_action "[ PHASE 5: NETWORK SECURITY ]"
+  # fix_hosts_file
+  # harden_ssh
+  # harden_kernel_sysctl
+  # log_action ""
 
-  # 6. FIREWALL CONFIGURATION
-  log_action "[ PHASE 6: FIREWALL ]"
-  enable_ufw
-  configure_firewall
-  log_action ""
+  # # 6. FIREWALL CONFIGURATION
+  # log_action "[ PHASE 6: FIREWALL ]"
+  # enable_ufw
+  # configure_firewall
+  # log_action ""
 
-  # 7. SERVICE MANAGEMENT
-  log_action "[ PHASE 7: SERVICE MANAGEMENT ]"
-  disable_unnecessary_services "./service_blacklist.txt"
-  audit_running_services
-  log_action ""
+  # # 7. SERVICE MANAGEMENT
+  # log_action "[ PHASE 7: SERVICE MANAGEMENT ]"
+  # disable_unnecessary_services "./service_blacklist.txt"
+  # audit_running_services
+  # log_action ""
 
-  # 8. PACKAGE AUDITING & REMOVAL
-  log_action "[ PHASE 8: SOFTWARE AUDITING ]"
-  remove_unauthorized_software "./package_blacklist.txt"
-  remove_prohibited_media
-  log_action ""
+  # # 8. PACKAGE AUDITING & REMOVAL
+  # log_action "[ PHASE 8: SOFTWARE AUDITING ]"
+  # remove_unauthorized_software "./package_blacklist.txt"
+  # remove_prohibited_media
+  # log_action ""
 
-  # 9. CRON SECURITY
-  log_action "[ PHASE 9: CRON SECURITY ]"
-  secure_cron_system
-  log_action ""
+  # # 9. CRON SECURITY
+  # log_action "[ PHASE 9: CRON SECURITY ]"
+  # secure_cron_system
+  # log_action ""
 
-  # 10. SYSTEM AUDITING
-  log_action "[ PHASE 10: SYSTEM AUDITING ]"
-  harden_auditd
-  log_action ""
+  # # 10. SYSTEM AUDITING
+  # log_action "[ PHASE 10: SYSTEM AUDITING ]"
+  # harden_auditd
+  # log_action ""
 
-  # 11. ANTIVIRUS & ROOTKIT DETECTION
-  log_action "[ PHASE 11: MALWARE DETECTION ]"
-  run_rootkit_scans
-  log_action ""
+  # # 11. ANTIVIRUS & ROOTKIT DETECTION
+  # log_action "[ PHASE 11: MALWARE DETECTION ]"
+  # run_rootkit_scans
+  # log_action ""
 
-  # 12. COMPREHENSIVE SECURITY AUDIT
-  log_action "[ PHASE 12: LYNIS AUDIT ]"
-  audit_with_lynis
-  log_action ""
+  # # 12. COMPREHENSIVE SECURITY AUDIT
+  # log_action "[ PHASE 12: LYNIS AUDIT ]"
+  # audit_with_lynis
+  # log_action ""
 
-  log_action "======================================"
-  log_action "HARDENING COMPLETE"
-  log_action "======================================"
-  log_action "IMPORTANT: Review the log at $LOG_FILE"
-  log_action "IMPORTANT: Reboot system to apply all changes"
-  log_action "Run: sudo reboot"
-  log_action ""
-  log_action "Completion time: $(date)"
+  # log_action "======================================"
+  # log_action "HARDENING COMPLETE"
+  # log_action "======================================"
+  # log_action "IMPORTANT: Review the log at $LOG_FILE"
+  # log_action "IMPORTANT: Reboot system to apply all changes"
+  # log_action "Run: sudo reboot"
+  # log_action ""
+  # log_action "Completion time: $(date)"
+
 }
 
 main
