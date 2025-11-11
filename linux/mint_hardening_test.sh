@@ -97,7 +97,7 @@ update_system() {
 
 update_packages() {
   log_action "Updating Unique list of Packages"
-  while IFS = read -r line; do
+  while IFS= read -r line; do
     apt-get install -y -qq "$line" &>/dev/null
     log_action "Installed/Updated package: $line"
   done < updatePackages.txt
@@ -592,7 +592,8 @@ secure_file_permissions() {
       chown "$user":"$user" "$home/.ssh/authorized_keys" 2>/dev/null
       chmod 600 "$home/.ssh/authorized_keys" 2>/dev/null
       log_action "Cleared keys for $user"
-  fi
+    fi
+  done
   log_action "Secured SSH configuration"
 
   # Sudoers
