@@ -475,7 +475,7 @@ configure_pam() {
 
   local preauth="auth required    pam_faillock.so preauth silent deny=5 unlock_time=1800"
   local authfail="auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800"
-  local authsucc="auth sufficient  pam_faillock.so authsucc"
+  local authsucc="auth required  pam_faillock.so authsucc"
 
   awk -v pre="$preauth" -v fail="$authfail" -v succ="$authsucc" '
     BEGIN { injected=0 }
