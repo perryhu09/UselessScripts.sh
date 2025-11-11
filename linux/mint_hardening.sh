@@ -58,7 +58,7 @@ preflight_check() {
   echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
   echo ""
   read -p "Have you completed ALL items on the checklist above? (print intials)" confirm1
-  if [[ ! "$confirm1" == "DH" ]]; then
+  if [[ ! "$confirm1" == "NP" ]]; then
     echo ""
     echo "Preflight check failed, complete the checklist before running this script"
     echo "Edit the script and configure the AUTHORIZED_USERS and ADMIN_USERS arrays."
@@ -93,6 +93,15 @@ update_system() {
 
   apt autoclean -y -qq &>/dev/null
   log_action "Cleaned package cache"
+}
+
+update_packages() {
+  log_action "Updating Unique list of Packages"
+  while IFS = read -r line; do
+    apt-get install -y -qq "$line" &>/dev/null
+    log_action "Installed/Updated package: $line"
+  done < updatePackages.txt
+  log_action "Finished Package Updates"
 }
 
 configure_automatic_updates() {
@@ -347,31 +356,162 @@ disallow_empty_passwords() {
 
   log_action "Disallowed empty user passwords"
 }
+#install password modules required for PAM if not found
+pkg_install_pam_modules() {
+  log_action "Installing required PAM modules if missing"
+
+  local -a pkgs=()
+
+  ls /lib/*/security/pam_pwquality.so >/dev/null 2>&1 || pkgs+=("libpam-pwquality")
+  ls /lib/*/security/pam_faillock.so  >/dev/null 2>&1 || pkgs+=("libpam-modules")
+  command -v faillock >/dev/null 2>&1 || pkgs+=("libpam-modules-bin")
+
+  if (( ${#pkgs[@]} )); then
+    apt-get update -y -qq &>/dev/null
+    if apt-get install -y -qq "${pkgs[@]}" &>/dev/null; then
+      log_action "Installed: ${pkgs[*]}"
+    else
+      log_action "ERROR: failed to install: ${pkgs[*]}"
+      exit 1
+    fi
+  else
+    log_action "PAM modules already present"
+  fi
+
+  for mod in pam_pwquality.so pam_pwhistory.so pam_faillock.so; do
+    if ! ls /lib/*/security/"$mod" >/dev/null 2>&1; then
+      log_action "ERROR: missing $mod even after install"
+      exit 1
+    fi
+  done
+}
+
+configure_pwquality_conf() {
+  log_action "Configuring /etc/security/pwquality.conf"
+  local file="/etc/security/pwquality.conf"
+  backup_file "$file"
+
+  declare -A want=(
+    [minlen]="12"
+    [maxrepeat]="3"
+    [ucredit]="-1"
+    [lcredit]="-1"
+    [dcredit]="-1"
+    [ocredit]="-1"
+    [difok]="3"
+    [reject_username]="1"
+    [enforce_for_root]="1"
+  )
+
+  local tmp
+  tmp="$(mktemp)"
+
+  if [[ -f "$file" ]]; then
+    # keep unrelated lines, drop the keys we manage
+    grep -Ev '^[[:space:]]*(minlen|maxrepeat|ucredit|lcredit|dcredit|ocredit|difok|reject_username|enforce_for_root)[[:space:]]*=' "$file" \
+      >"$tmp" || true
+  fi
+
+  {
+    echo "# Managed by hardening script on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    for k in "${!want[@]}"; do
+      printf "%s = %s\n" "$k" "${want[$k]}"
+    done
+  } >>"$tmp"
+
+  install -m 0644 "$tmp" "$file"
+  rm -f "$tmp"
+  log_action "pwquality.conf updated"
+}
+
 
 configure_pam() {
-  log_action "=== CONFIGURING PAM: PWD COMPLEXITY, HISTORY, & ACCOUNT LOCKOUT=="
+  log_action "=== CONFIGURING PAM: complexity, history, lockout ==="
 
-  apt install -y libpam-pwquality &>/dev/null
+  pkg_install_pam_modules
 
+  # common-password: pwquality then pwhistory, then existing pam_unix.so
   backup_file /etc/pam.d/common-password
+  local pwfile="/etc/pam.d/common-password"
+  local tmp
+  tmp="$(mktemp)"
 
-  sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
-  sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
-  log_action "Configured password complexity requirements"
+  # lines to enforce
+  local pwq_line="password required pam_pwquality.so try_first_pass retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root"
+  local pwh_line="password required pam_pwhistory.so remember=5 enforce_for_root use_authtok"
 
-  sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
-  sed -i '/pam_unix.so/i password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
-  log_action "Configured password history (remember=5)"
+  awk -v pwq="$pwq_line" -v pwh="$pwh_line" '
+    BEGIN { injected=0 }
+    /pam_pwquality\.so/ { next }
+    /pam_pwhistory\.so/ { next }
+    /^password/ && /pam_unix\.so/ && injected==0 {
+      print pwq
+      print pwh
+      print
+      injected=1
+      next
+    }
+    { print }
+    END {
+      if (injected==0) {
+        print pwq
+        print pwh
+      }
+    }
+  ' "$pwfile" > "$tmp"
 
+  install -m 0644 "$tmp" "$pwfile"
+  rm -f "$tmp"
+
+  # make sure pam_unix.so does not allow empty passwords
+  sed -i 's/\(\bpam_unix\.so[^#]*\)\bnullok\b/\1/g' "$pwfile"
+
+  log_action "common-password updated"
+
+  # common-auth: faillock around pam_unix
   backup_file /etc/pam.d/common-auth
+  local aufile="/etc/pam.d/common-auth"
+  tmp="$(mktemp)"
 
-  sed -i '/pam_unix.so/i auth required pam_faillock.so preauth silent deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
-  sed -i '/pam_unix.so/a auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
+  local preauth="auth required    pam_faillock.so preauth silent deny=5 unlock_time=1800"
+  local authfail="auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800"
+  local authsucc="auth sufficient  pam_faillock.so authsucc"
 
+  awk -v pre="$preauth" -v fail="$authfail" -v succ="$authsucc" '
+    BEGIN { injected=0 }
+    /pam_faillock\.so/ { next }
+    /^auth/ && /pam_unix\.so/ && injected==0 {
+      print pre
+      print
+      print fail
+      print succ
+      injected=1
+      next
+    }
+    { print }
+    END {
+      if (injected==0) {
+        print pre
+        print fail
+        print succ
+      }
+    }
+  ' "$aufile" > "$tmp"
+
+  install -m 0644 "$tmp" "$aufile"
+  rm -f "$tmp"
+  log_action "common-auth updated"
+
+  # common-account: ensure faillock account check is present
   backup_file /etc/pam.d/common-account
-  sed -i '1i account required pam_faillock.so' /etc/pam.d/common-account &>/dev/null
+  if ! grep -qE '^[[:space:]]*account[[:space:]]+required[[:space:]]+pam_faillock\.so' /etc/pam.d/common-account; then
+    echo "account required pam_faillock.so" >> /etc/pam.d/common-account
+    log_action "Added faillock to common-account"
+  else
+    log_action "faillock already present in common-account"
+  fi
 
-  log_action "Configured account lockout with pam_faillock (5 attempts, 30 min lockout)"
+  log_action "PAM configuration complete"
 }
 
 set_password_aging() {
@@ -1281,6 +1421,7 @@ main() {
   # 1. SYSTEM UPDATES (Do this first for security patches)
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
   update_system
+  update_packages
   configure_automatic_updates
   log_action ""
 
@@ -1297,6 +1438,7 @@ main() {
   # 3. PASSWORD POLICIES
   log_action "[ PHASE 3: PASSWORD POLICIES ]"
   disallow_empty_passwords
+  configure_pwquality_conf
   configure_pam
   set_password_aging
   log_action ""
