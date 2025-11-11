@@ -583,6 +583,16 @@ secure_file_permissions() {
   # SSH Configuration
   [ -f /etc/ssh/sshd_config ] && chmod 600 /etc/ssh/sshd_config &>/dev/null && chown root:root /etc/ssh/sshd_config
   [ -d /etc/ssh ] && chmod 755 /etc/ssh && chown root:root /etc/ssh
+   log_action "=== CLEANING UNAUTHORIZED SSH KEYS ==="
+  awk -F: '($3>=1000)&&($1!="nobody"){print $1":"$6}' /etc/passwd | while IFS=: read -r user home; do
+    [ -d "$home/.ssh" ] || continue
+    if ! printf '%s\n' "${AUTHORIZED_USERS[@]}" | grep -qx "$user"; then
+      backup_file "$home/.ssh/authorized_keys"
+      : > "$home/.ssh/authorized_keys"
+      chown "$user":"$user" "$home/.ssh/authorized_keys" 2>/dev/null
+      chmod 600 "$home/.ssh/authorized_keys" 2>/dev/null
+      log_action "Cleared keys for $user"
+  fi
   log_action "Secured SSH configuration"
 
   # Sudoers
@@ -716,7 +726,7 @@ fix_hosts_file() {
     log_action "WARNING: Found $suspicious_count suspicious/non-standard entries in /etc/hosts"
     log_action "Suspicious Entries:"
     echo "$suspicious_entries" | while read line; do
-      log_action "	$line"
+      log_action "  $line"
     done
   fi
 
@@ -892,6 +902,12 @@ configure_firewall() {
     log_action "Removed iptables-persistent"
   fi
 
+  if [ -f /etc/default/ufw ]; then
+    backup_file /etc/default/ufw
+    sed -i 's/^IPV6=.*/IPV6=yes/' /etc/default/ufw
+  fi
+
+
   ufw --force reset
   log_action "Reset UFW to defaults"
 
@@ -903,6 +919,7 @@ configure_firewall() {
   log_action "Configured loopback rules"
 
   # Default policies
+  ufw logging high
   ufw default deny incoming
   ufw default allow outgoing
   ufw default deny routed
@@ -1065,6 +1082,7 @@ remove_prohibited_media() {
     "*.ogg"
     "*.m4a"
     "*.aac"
+    "*.jpg"
   )
 
   for ext in "${MEDIA_EXTENSIONS[@]}"; do
@@ -1075,6 +1093,22 @@ remove_prohibited_media() {
   done
 
   log_action "Removed prohibited media"
+}
+
+tighten_sudo_defaults() {
+  log_action "=== TIGHTENING SUDO DEFAULTS ==="
+  backup_file /etc/sudoers
+  {
+    echo 'Defaults use_pty'
+    echo 'Defaults logfile="/var/log/sudo.log"'
+    echo 'Defaults timestamp_timeout=0'
+    echo 'Defaults passwd_tries=3'
+    echo 'Defaults secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
+    echo 'Defaults env_reset'
+    echo 'Defaults insults'
+  } | EDITOR='tee -a' visudo -f /etc/sudoers >/dev/null
+  touch /var/log/sudo.log && chmod 600 /var/log/sudo.log
+  log_action "Sudo defaults hardened"
 }
 
 #===============================================
@@ -1434,6 +1468,7 @@ main() {
   set_all_user_passwords
   log_action ""
   lock_root_account
+  tighten_sudo_defaults
 
   # 3. PASSWORD POLICIES
   log_action "[ PHASE 3: PASSWORD POLICIES ]"
