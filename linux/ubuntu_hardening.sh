@@ -314,13 +314,13 @@ configure_pam() {
   log_action "Configured password complexity requirements"
 
   sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
-  sed -i '/pam_unix.so/i password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_unix.so/a password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
   log_action "Configured password history (remember=5)"
 
   backup_file /etc/pam.d/common-auth
 
   sed -i '/pam_unix.so/i auth required pam_faillock.so preauth silent deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
-  sed -i '/pam_unix.so/a auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
+  sed -i '/pam_unix.so/a auth required pam_faillock.so authfail deny=5 unlock_time=1800' /etc/pam.d/common-auth &>/dev/null
 
   backup_file /etc/pam.d/common-account
   sed -i '1i account required pam_faillock.so' /etc/pam.d/common-account &>/dev/null
@@ -685,15 +685,6 @@ EOF
 # Firewall
 #===============================================
 
-enable_ufw() {
-  log_action "=== ENABLING UNCOMPLICATED FIREWALL (UFW)==="
-
-  if ufw status | grep -q "inactive"; then
-    ufw --force enable
-    log_action "UFW has been enabled"
-  fi
-}
-
 configure_firewall() {
   log_action "=== CONFIGURING UFW FIREWALL ==="
 
@@ -719,12 +710,8 @@ configure_firewall() {
   ufw default deny routed
   log_action "Set default policies"
 
-  # ADD SERVICE SPECIFIC RULES BASED ON README
-  # ie: allow http, https, mysql, ssh, etc
-  # sudo ufw allow ssh
-  # sudo ufw reload
-  # sudo systemctl enable ssh
-  # sudo systemctl start ssh
+  ufw --force enable 
+  log_action "UFW enabled"
 
   log_action "Firewall configuration complete"
 }
