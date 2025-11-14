@@ -54,7 +54,48 @@ pkg_install_pam_modules() {
 }
 
 configure_pam() {
-        #implementation here
+  log_action "=== CONFIGURING PAM: PWD COMPLEXITY, HISTORY, & ACCOUNT LOCKOUT=="
+  
+  apt install -y libpam-pwquality libpam-modules libpam-modules-bin &>/dev/null
+  
+  # PASSWORD COMPLEXITY & HISTORY (your existing code)
+  backup_file /etc/pam.d/common-password
+  sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
+  log_action "Configured password complexity requirements"
+  
+  sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_unix.so/a password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
+  log_action "Configured password history (remember=5)"
+  
+  # ACCOUNT LOCKOUT - Rewrite the file cleanly
+  backup_file /etc/pam.d/common-auth
+  
+  cat > /etc/pam.d/common-auth << 'EOF'
+# Added by hardening script - Account lockout
+auth required pam_faillock.so preauth silent deny=5 unlock_time=1800
+
+# Standard Unix authentication
+auth [success=2 default=ignore] pam_unix.so nullok try_first_pass
+
+# Faillock on auth failure
+auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800
+auth sufficient pam_faillock.so authsucc
+
+# PAM configuration (common-auth)
+auth requisite pam_deny.so
+auth required pam_permit.so
+EOF
+  
+  log_action "Rewrote common-auth with faillock"
+  
+  # ACCOUNT PHASE
+  backup_file /etc/pam.d/common-account
+  if ! grep -q "pam_faillock.so" /etc/pam.d/common-account; then
+    sed -i '1i account required pam_faillock.so' /etc/pam.d/common-account
+  fi
+  
+  log_action "Account lockout configured"
 }
 
 configure_pam

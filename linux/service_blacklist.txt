@@ -177,3 +177,9 @@ bloodhound
 nimcrypt2
 donut
 sharpshooter
+squid
+squid3
+apache2
+apache
+httpd
+nginx

@@ -305,7 +305,7 @@ disallow_empty_passwords() {
 configure_pam() {
   log_action "=== CONFIGURING PAM: PWD COMPLEXITY, HISTORY, & ACCOUNT LOCKOUT=="
 
-  apt install -y libpam-pwquality &>/dev/null
+  apt install -y libpam-pwquality libpam-modules libpam-modules-bin &>/dev/null
 
   backup_file /etc/pam.d/common-password
 

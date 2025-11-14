@@ -287,7 +287,6 @@ lighttpd
 tcpdump
 netcat-traditional
 ophcrack
-thunderbird
 postfix
 sendmail
 zimbra
@@ -314,3 +313,12 @@ qbittorrent
 rtorrent
 aria2
 bittorrent
+apache2
+apache2-bin
+apache2-utils
+squid
+squid3
+squid-common
+doona
+xprobe
+xprobe2
