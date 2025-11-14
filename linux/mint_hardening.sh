@@ -1,3 +1,5 @@
+# Written by: Dominic Hu, Naren Pai, Victor Zhou
+
 #!/usr/bin/env bash
 
 #===============================================
@@ -58,7 +60,7 @@ preflight_check() {
   echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
   echo ""
   read -p "Have you completed ALL items on the checklist above? (print intials)" confirm1
-  if [[ ! "$confirm1" == "NP" ]]; then
+  if [[ ! "$confirm1" == "DH" ]]; then
     echo ""
     echo "Preflight check failed, complete the checklist before running this script"
     echo "Edit the script and configure the AUTHORIZED_USERS and ADMIN_USERS arrays."
@@ -82,10 +84,24 @@ preflight_check() {
 update_system() {
   log_action "=== UPDATING SYSTEM PACKAGES ==="
 
-  apt update -y -qq &>/dev/null
+  # kill any apt processes
+  pkill -9 apt &>/dev/null || true
+  pkill -9 apt-get &>/dev/null || true
+  pkill -9 dpkg &>/dev/null || true
+  sleep 1
+
+  # remove lock files 
+  rm -f /var/lib/dpkg/lock-frontend &>/dev/null || true
+  rm -f /var/lib/dpkg/lock &>/dev/null || true
+  rm -f /var/cache/apt/archives/lock &>/dev/null || true
+
+  DEBIAN_FRONTEND=noninteractive apt update -y -qq &>/dev/null
   log_action "Updated package lists"
 
-  apt full-upgrade -y -qq &>/dev/null
+  DEBIAN_FRONTEND=noninteractive apt full-upgrade -y -qq \
+    -o Dpkg::Options::="--force-confold" \
+    -o Dpkg::Options::="--force-confdef" \
+    &>/dev/null
   log_action "Performed full system upgrade"
 
   apt autoremove -y -qq &>/dev/null
@@ -362,57 +378,14 @@ configure_pam() {
   
   apt install -y libpam-pwquality libpam-modules libpam-modules-bin &>/dev/null
   
-  # === PASSWORD COMPLEXITY ===
   backup_file /etc/pam.d/common-password
   sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
   sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
   log_action "Configured password complexity requirements"
   
-  # === PASSWORD HISTORY ===
   sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
   sed -i '/pam_unix.so/a password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
   log_action "Configured password history (remember=5)"
-  
-  # === ACCOUNT LOCKOUT ===
-  backup_file /etc/pam.d/common-auth
-  local aufile="/etc/pam.d/common-auth"
-  local tmp
-  tmp="$(mktemp)"
-  
-  # Define the three faillock lines with correct control flags
-  local preauth="auth required    pam_faillock.so preauth silent deny=5 unlock_time=1800"
-  local authfail="auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800"
-  local authsucc="auth sufficient  pam_faillock.so authsucc"
-  
-  # Use awk to properly inject faillock lines around pam_unix.so
-  awk -v pre="$preauth" -v fail="$authfail" -v succ="$authsucc" '
-    BEGIN { injected=0 }
-    /pam_faillock\.so/ { next }
-    /^auth/ && /pam_unix\.so/ && injected==0 {
-      print pre
-      print
-      print fail
-      print succ
-      injected=1
-      next
-    }
-    { print }
-  ' "$aufile" > "$tmp"
-  
-  install -m 0644 "$tmp" "$aufile"
-  rm -f "$tmp"
-  log_action "Configured account lockout in common-auth"
-  
-  # === ACCOUNT PHASE ===
-  backup_file /etc/pam.d/common-account
-  if ! grep -qE '^[[:space:]]*account[[:space:]]+required[[:space:]]+pam_faillock\.so' /etc/pam.d/common-account; then
-    echo "account required pam_faillock.so" >> /etc/pam.d/common-account
-    log_action "Added faillock to common-account"
-  else
-    log_action "faillock already present in common-account"
-  fi
-  
-  log_action "Account lockout configured (5 attempts, 30 min lockout)"
 }
 
 set_password_aging() {
@@ -455,6 +428,7 @@ set_password_aging() {
     fi
   done
 }
+
 #===============================================
 # File Permissions
 #===============================================
