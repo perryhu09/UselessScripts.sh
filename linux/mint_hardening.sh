@@ -97,15 +97,19 @@ enable_security_updates() {
     log_action "Security update repos ensured"
 }
 
+enable_auto_update_refresh() {
+    log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
+
+    sudo systemctl enable --now apt-daily.timer &>/dev/null
+    sudo systemctl enable --now apt-daily-upgrade.timer &>/dev/null
+
+    log_action "Automatic update refresh enabled"
+}
+
 update_system() {
   log_action "=== UPDATING SYSTEM PACKAGES ==="
 
   enable_security_updates
-
-  sudo apt update -y -qq &>/dev/null
-  sudo apt full-upgrade -y -qq &>/dev/null
-
-  log_action "System packages updated"
 
   # Kill any apt processes
   pkill -9 apt &>/dev/null || true
@@ -1394,6 +1398,7 @@ main() {
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
   update_system
   configure_automatic_updates
+  enable_auto_update_refresh
   log_action ""
 
   log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
