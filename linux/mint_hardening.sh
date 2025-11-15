@@ -396,10 +396,10 @@ set_password_aging() {
   fi
 
   # pwd expiration warning
-  if grep -q "^PASS_WARN_DAYS" /etc/login.defs; then
-    sed -i 's/^PASS_WARN_DAYS.*/PASS_WARN_DAYS   7/' /etc/login.defs &>/dev/null
+  if grep -q "^PASS_WARN_AGE" /etc/login.defs; then
+    sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE   7/' /etc/login.defs &>/dev/null
   else
-    echo "PASS_WARN_DAYS   7" >>/etc/login.defs
+    echo "PASS_WARN_AGE   7" >>/etc/login.defs
   fi
 
   log_action "Set password aging: max=14 days, min=5 days, warn=7 days"
