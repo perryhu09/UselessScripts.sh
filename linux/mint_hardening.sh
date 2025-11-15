@@ -81,8 +81,31 @@ preflight_check() {
 # System Updates
 #===============================================
 
+enable_security_updates() {
+    log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
+
+    # Fix commented-out security lines
+    sudo sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
+
+    # If security repo is missing, add it based on current codename
+    CODENAME="$(lsb_release -sc)"
+    if ! grep -Rq "${CODENAME}-security" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+        echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >/dev/null
+        log_action "Added missing security repo for ${CODENAME}"
+    fi
+
+    log_action "Security update repos ensured"
+}
+
 update_system() {
   log_action "=== UPDATING SYSTEM PACKAGES ==="
+
+  enable_security_updates
+
+  sudo apt update -y -qq &>/dev/null
+  sudo apt full-upgrade -y -qq &>/dev/null
+
+  log_action "System packages updated"
 
   # Kill any apt processes
   pkill -9 apt &>/dev/null || true
@@ -135,6 +158,8 @@ APT::Periodic::Unattended-Upgrade "1";
 EOF
   log_action "Configured daily automatic updates"
 }
+
+
 
 #===============================================
 # Users && Groups
