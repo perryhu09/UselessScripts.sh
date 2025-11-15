@@ -163,8 +163,6 @@ EOF
   log_action "Configured daily automatic updates"
 }
 
-
-
 #===============================================
 # Users && Groups
 #===============================================
