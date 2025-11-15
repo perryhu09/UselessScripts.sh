@@ -322,3 +322,6 @@ squid-common
 doona
 xprobe
 xprobe2
+nginx
+aisleriot
+thunderbird
