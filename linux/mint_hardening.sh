@@ -81,8 +81,35 @@ preflight_check() {
 # System Updates
 #===============================================
 
+enable_security_updates() {
+    log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
+
+    # Fix commented-out security lines
+    sudo sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
+
+    # If security repo is missing, add it based on current codename
+    CODENAME="$(lsb_release -sc)"
+    if ! grep -Rq "${CODENAME}-security" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+        echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >/dev/null
+        log_action "Added missing security repo for ${CODENAME}"
+    fi
+
+    log_action "Security update repos ensured"
+}
+
+enable_auto_update_refresh() {
+    log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
+
+    sudo systemctl enable --now apt-daily.timer &>/dev/null
+    sudo systemctl enable --now apt-daily-upgrade.timer &>/dev/null
+
+    log_action "Automatic update refresh enabled"
+}
+
 update_system() {
   log_action "=== UPDATING SYSTEM PACKAGES ==="
+
+  enable_security_updates
 
   # Kill any apt processes
   pkill -9 apt &>/dev/null || true
@@ -1369,6 +1396,7 @@ main() {
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
   update_system
   configure_automatic_updates
+  enable_auto_update_refresh
   log_action ""
 
   log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
