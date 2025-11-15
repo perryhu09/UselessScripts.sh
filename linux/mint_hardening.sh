@@ -1,6 +1,6 @@
-# Written by: Dominic Hu, Naren Pai, Victor Zhou
-
 #!/usr/bin/env bash
+
+# Written by: Dominic Hu, Naren Pai, Victor Zhou
 
 #===============================================
 # Configuration && Setup
