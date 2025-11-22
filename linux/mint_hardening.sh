@@ -22,6 +22,7 @@ if [ -n "$SUDO_USER" ]; then
 else
   ACTUAL_USER_HOME="$HOME"
 fi
+
 LOG_FILE="$ACTUAL_USER_HOME/Desktop/hardening.log"
 
 # Logging Function
@@ -83,13 +84,11 @@ preflight_check() {
 
 enable_security_updates() {
     log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
-    # Fix commented-out security lines
-    sudo sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
+    sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
 
-    # If security repo is missing, add it based on current codename
     CODENAME="$(lsb_release -sc)"
     if ! grep -Rq "${CODENAME}-security" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
-        echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >/dev/null
+        echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" | tee -a /etc/apt/sources.list >/dev/null
         log_action "Added missing security repo for ${CODENAME}"
     fi
     
@@ -99,8 +98,8 @@ enable_security_updates() {
 enable_auto_update_refresh() {
     log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
 
-    sudo systemctl enable --now apt-daily.timer &>/dev/null
-    sudo systemctl enable --now apt-daily-upgrade.timer &>/dev/null
+    systemctl enable --now apt-daily.timer &>/dev/null
+    systemctl enable --now apt-daily-upgrade.timer &>/dev/null
 
     log_action "Automatic update refresh enabled"
 }
@@ -206,7 +205,7 @@ fix_admin_group() {
   for user in $SUDO_MEMBERS; do
     if [[ ! "${ADMIN_USERS[@]}" =~ "${user}" ]]; then
       log_action "Removing $user from sudo group"
-      sudo deluser "$user" sudo &>/dev/null
+      deluser "$user" sudo &>/dev/null
     fi
   done
 
@@ -215,7 +214,7 @@ fix_admin_group() {
     for user in $ADMIN_MEMBERS; do
       if [[ ! "${ADMIN_USERS[@]}" =~ "${user}" ]]; then
         log_action "Removing $user from admin group"
-        sudo deluser "$user" admin &>/dev/null
+        deluser "$user" admin &>/dev/null
       fi
     done
   fi
@@ -247,17 +246,14 @@ check_uid_zero() {
 disable_guest() {
   log_action "=== DISABLING GUEST ACCOUNT ==="
 
-  # LightDM (Common in Linux Mint Xfce, MATE editions)
+  # LightDM 
   if [ -f /etc/lightdm/lightdm.conf ]; then
     backup_file /etc/lightdm/lightdm.conf
 
-    # Check if [Seat:*] section exists
     if grep -q "^\[Seat:\*\]" /etc/lightdm/lightdm.conf; then
-      # Remove any existing allow-guest lines and add after [Seat:*]
       sed -i '/^[#[:space:]]*allow-guest=/d' /etc/lightdm/lightdm.conf
       sed -i '/^\[Seat:\*\]/a allow-guest=false' /etc/lightdm/lightdm.conf
     else
-      # Add [Seat:*] section with allow-guest=false
       echo -e "\n[Seat:*]\nallow-guest=false" >> /etc/lightdm/lightdm.conf
     fi
     log_action "Disabled guest account in lightdm.conf"
@@ -273,7 +269,7 @@ disable_guest() {
   # Update dconf database
   if command -v dconf &>/dev/null; then
     dconf update 2>/dev/null
-    log_action "Updated Cinnamon dconf settings to harden guest access"
+    log_action "Updated dconf configuration database"
   fi
 
   # GDM3 Display Manager (if used in some Mint configurations)
@@ -764,25 +760,6 @@ harden_ssh() {
   log_action "SSH Hardening complete (reboot required)"
 }
 
-enable_tcp_syncookies() {
-  log_action "=== ENABLING IPv4 TCP SYN COOKIES ==="
-
-  backup_file /etc/sysctl.conf
-
-  if grep -q "^.*net.ipv4.tcp_syncookies" /etc/sysctl.conf; then
-    sed -i 's/^#.*net.ipv4.tcp_syncookies.*/net.ipv4.tcp_syncookies=1/' /etc/sysctl.conf
-    log_action "Uncommented and enabled TCP SYN cookies"
-  elif grep -q "^net.ipv4.tcp_syncookies" /etc/sysctl.conf; then
-    sed -i 's/^.*net.ipv4.tcp_syncookies.*/net.ipv4.tcp_syncookies=1/' /etc/sysctl.conf
-    log_action "Enabled TCP SYN cookies"
-  else
-    echo "net.ipv4.tcp_syncookies=1" >>/etc/sysctl.conf
-    log_action "Enabled TCP SYN cookies (added new setting)"
-  fi
-
-  log_action "Applied TCP SYN cookies to running system (reboot required)"
-}
-
 harden_kernel_sysctl() {
   log_action "=== HARDENING KERNEL VIA SYSCTL ==="
 
@@ -1082,7 +1059,7 @@ remove_prohibited_media() {
     done
   done
 
-  log_action "Removed prohibited media"
+  log_action "Possible prohibited media found (NOT REMOVED)"
 }
 
 #===============================================
@@ -1445,13 +1422,13 @@ main() {
   secure_cron_system
   log_action ""
 
-  log_action "[ PHASE 10: SYSTEM AUDITING ]"
-  harden_auditd
-  enable_app_armor
+  log_action "[ PHASE 10: MALWARE DETECTION ]"
+  run_rootkit_scans
   log_action ""
 
-  log_action "[ PHASE 11: MALWARE DETECTION ]"
-  run_rootkit_scans
+  log_action "[ PHASE 11: SYSTEM AUDITING ]"
+  harden_auditd
+  enable_app_armor
   log_action ""
 
   log_action "[ PHASE 12: LYNIS AUDIT ]"
