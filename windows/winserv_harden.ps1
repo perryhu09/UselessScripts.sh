@@ -584,6 +584,59 @@ function checkUAC {
     }
 }
 
+function Clear-UserProfilesSafe {
+    # Prompt for the username to keep
+    $KeepUser = Read-Host "Enter the username you want to KEEP (case-sensitive as shown in C:\Users)"
+
+    $userRoot = "C:\Users"
+
+    # Folders to always skip (system/important)
+    $skip = @("Default", "Default User", "All Users", $KeepUser)
+
+    # Allowed standard profile folders (whitelist)
+    $allowedFolders = @(
+        "Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music",
+        "Favorites", "Links", "Saved Games", "Searches", "3D Objects", "Contacts"
+    )
+
+    # Process each profile folder
+    $profiles = Get-ChildItem -Path $userRoot -Directory
+    foreach ($p in $profiles) {
+        if ($skip -contains $p.Name) {
+            Write-Host "Skipping $($p.Name)"
+            continue
+        }
+
+        Write-Host "Cleaning extra files in: $($p.Name)"
+
+        # Remove files/folders in the user folder that are NOT in the allowedFolders whitelist
+        $items = Get-ChildItem -Path $p.FullName -Force
+        foreach ($item in $items) {
+            if ($allowedFolders -notcontains $item.Name) {
+                try {
+                    Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Host "Removed: $($item.FullName)"
+                } catch { Write-Host "Failed to remove: $($item.FullName)" }
+            }
+        }
+    }
+
+    # Also clean Public folder, keeping structure
+    $publicPath = Join-Path $userRoot "Public"
+    Write-Host "Cleaning Public folder..."
+    $publicAllowed = @("Desktop","Documents","Downloads","Pictures","Videos","Music","Public Desktop","Public Documents","Public Downloads")
+    $publicItems = Get-ChildItem -Path $publicPath -Force
+    foreach ($item in $publicItems) {
+        if ($publicAllowed -notcontains $item.Name) {
+            try { Remove-Item -Path $item.FullName -Recurse -Force -ErrorAction SilentlyContinue } catch {}
+        }
+    }
+
+    Write-Host "Cleanup complete. Only standard folders remain."
+}
+
+
+
 function set_lockout_policy {
     Write-Host "Setting account lockout policy..."
     try {
@@ -610,7 +663,6 @@ function secure_password_policy {
         # Set password history
         net accounts /uniquepw:7
 
-        # Disable Storing of passwords through reversible encryption
         # Disable storing passwords using reversible encryption
         secedit /export /cfg C:\Windows\Temp\secpol.cfg
         (Get-Content C:\Windows\Temp\secpol.cfg) -replace 'PasswordStoreClearText\s*=\s*1', 'PasswordStoreClearText = 0' |
@@ -686,6 +738,59 @@ function enable_critical_services {
         }
     }
 }
+
+function Remove-ProhibitedApps {
+
+    Write-Host "Enter allowed apps EXACTLY as they appear in Programs & Features."
+    Write-Host "Separate each one with a comma."
+    $input = Read-Host "Allowed apps"
+    $AllowedApps = $input.Split(",").ForEach{ $_.Trim() }
+
+    Write-Host "`nScanning installed software..."
+    $installed = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, 
+                                   HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* `
+                                   -ErrorAction SilentlyContinue |
+                 Where-Object { $_.DisplayName } |
+                 Sort-Object DisplayName
+
+    foreach ($app in $installed) {
+        $name = $app.DisplayName
+
+        # Skip whitelisted apps
+        if ($AllowedApps -contains $name) {
+            Write-Host "KEEPING: $name" -ForegroundColor Green
+            continue
+        }
+
+        # Skip Microsoft / Windows components
+        if ($name -match "Microsoft|Windows|Visual C\+\+|Edge|OneDrive|Update") {
+            Write-Host "SYSTEM APP (ignored): $name" -ForegroundColor Yellow
+            continue
+        }
+
+        Write-Host "REMOVING: $name" -ForegroundColor Red
+
+        try {
+            # Use uninstall string if available
+            if ($app.UninstallString) {
+                $cmd = $app.UninstallString
+
+                # Fix msiexec uninstall syntax
+                if ($cmd -match "MsiExec.exe") {
+                    Start-Process "msiexec.exe" -ArgumentList "/x $($app.PSChildName) /quiet /norestart" -NoNewWindow -Wait
+                } else {
+                    Start-Process $cmd -ArgumentList "/quiet /norestart" -NoNewWindow -Wait
+                }
+            }
+
+        } catch {
+            Write-Host "Failed to remove $name"
+        }
+    }
+
+    Write-Host "`nThird-party cleanup complete."
+}
+
 function secure_registry_settings {
     Write-Host "Configuring secure registry settings..."
 
@@ -779,44 +884,7 @@ function secure_registry_settings {
     }
 }
 
-function remove_third_party_apps {
 
-    $apps = @{
-        'Hashcat'     = 'hashcat'
-        'Nmap'        = 'nmap'
-        'Wireshark'   = 'wireshark'
-        'Ophcrack'    = 'ophcrack'
-        'Metasploit'  = 'metasploit'
-        'Steam'       = 'steam'
-        'TeamViewer'  = 'teamviewer'
-        'PuTTY'       = 'putty'
-        'iTunes'      = 'itunes'
-        'CCleaner'    = 'ccleaner'
-    }
-
-    foreach ($friendlyName in $apps.Keys) {
-        $filter = "Name = '$friendlyName'"
-        try {
-            $products = Get-WmiObject -Class Win32_Product -Filter $filter -ErrorAction SilentlyContinue
-            if (-not $products) { continue }
-
-            foreach ($product in $products) {
-                try {
-                    $result = $product.Uninstall()
-                    if ($result.ReturnValue -eq 0) {
-                        Write-Host "Uninstalled: $($product.Name)"
-                    } else {
-                        Write-Host "Uninstall failed ($($result.ReturnValue)): $($product.Name)"
-                    }
-                } catch {
-                    Write-Host "Uninstall error: $($_.Exception.Message)"
-                }
-            }
-        } catch {
-            Write-Host "Query error: $($_.Exception.Message)"
-        }
-    }
-}
 
 function stop-DefaultSharedFolders {
     param(
@@ -877,7 +945,7 @@ function stop-DefaultSharedFolders {
                 & net share $name /delete | Out-Null
                 Write-Host "Requested removal via 'net share' for: $name"
             }
-        } catch {
+        } catch {   
             Write-Host "Failed to remove $($name): $($_.Exception.Message)"
         }
     }
@@ -914,7 +982,8 @@ function main {
     secure_password_policy
     enable_critical_services
     secure_registry_settings
-    remove_third_party_apps 
+    Clear-UserProfilesSafe
     stop-DefaultSharedFolders
+    Remove-ProhibitedApps
 }
 main
