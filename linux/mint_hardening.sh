@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Written by: Dominic Hu, Naren Pai, Victor Zhou
+
 #===============================================
 # Configuration && Setup
 #===============================================
@@ -14,7 +16,7 @@ ADMIN_USERS=()
 #===============================================
 # Utility Functions
 #===============================================
-# Set up log  directory and file
+# Set up log directory and file
 if [ -n "$SUDO_USER" ]; then
   ACTUAL_USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
 else
@@ -57,8 +59,8 @@ preflight_check() {
   echo ""
   echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
   echo ""
-  read -p "Have you completed ALL items on the checklist above? (print intials)" confirm1
-  if [[ ! "$confirm1" == "NP" ]]; then
+  read -p "Have you completed ALL items on the checklist above? (print initials)" confirm1
+  if [[ ! "$confirm1" == "DH" ]]; then
     echo ""
     echo "Preflight check failed, complete the checklist before running this script"
     echo "Edit the script and configure the AUTHORIZED_USERS and ADMIN_USERS arrays."
@@ -70,7 +72,7 @@ preflight_check() {
   read -p "Type 'I UNDERSTAND' to proceed: " confirm2
   if [[ "$confirm2" != "I UNDERSTAND" ]]; then
       echo ""
-      echo "Confirmation failed. Exiting for saftey"
+      echo "Confirmation failed. Exiting for safety"
       exit 1
   fi
 }
@@ -79,13 +81,53 @@ preflight_check() {
 # System Updates
 #===============================================
 
+enable_security_updates() {
+    log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
+    # Fix commented-out security lines
+    sudo sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
+
+    # If security repo is missing, add it based on current codename
+    CODENAME="$(lsb_release -sc)"
+    if ! grep -Rq "${CODENAME}-security" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+        echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >/dev/null
+        log_action "Added missing security repo for ${CODENAME}"
+    fi
+    
+    log_action "Security update repos ensured"
+}
+
+enable_auto_update_refresh() {
+    log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
+
+    sudo systemctl enable --now apt-daily.timer &>/dev/null
+    sudo systemctl enable --now apt-daily-upgrade.timer &>/dev/null
+
+    log_action "Automatic update refresh enabled"
+}
+
 update_system() {
   log_action "=== UPDATING SYSTEM PACKAGES ==="
 
-  apt update -y -qq &>/dev/null
+  enable_security_updates
+
+  # Kill any apt processes
+  pkill -9 apt &>/dev/null || true
+  pkill -9 apt-get &>/dev/null || true
+  pkill -9 dpkg &>/dev/null || true
+  sleep 1
+
+  # Remove lock files 
+  rm -f /var/lib/dpkg/lock-frontend &>/dev/null || true
+  rm -f /var/lib/dpkg/lock &>/dev/null || true
+  rm -f /var/cache/apt/archives/lock &>/dev/null || true
+
+  DEBIAN_FRONTEND=noninteractive apt update -y -qq &>/dev/null
   log_action "Updated package lists"
 
-  apt full-upgrade -y -qq &>/dev/null
+  DEBIAN_FRONTEND=noninteractive apt full-upgrade -y -qq \
+    -o Dpkg::Options::="--force-confold" \
+    -o Dpkg::Options::="--force-confdef" \
+    &>/dev/null
   log_action "Performed full system upgrade"
 
   apt autoremove -y -qq &>/dev/null
@@ -93,15 +135,6 @@ update_system() {
 
   apt autoclean -y -qq &>/dev/null
   log_action "Cleaned package cache"
-}
-
-update_packages() {
-  log_action "Updating Unique list of Packages"
-  while IFS = read -r line; do
-    apt-get install -y -qq "$line" &>/dev/null
-    log_action "Installed/Updated package: $line"
-  done < updatePackages.txt
-  log_action "Finished Package Updates"
 }
 
 configure_automatic_updates() {
@@ -164,7 +197,7 @@ remove_unauthorized_users() {
 fix_admin_group() {
   log_action "=== FIXING SUDO GROUP MEMBERSHIP ==="
 
-  # ADMIN - older ubuntu versions used admin group, included for compatability
+  # ADMIN - older ubuntu versions used admin group, included for compatibility
 
   SUDO_MEMBERS=$(getent group sudo | cut -d: -f4 | tr ',' ' ')
   ADMIN_MEMBERS=$(getent group admin 2>/dev/null | cut -d: -f4 | tr ',' ' ')
@@ -237,35 +270,10 @@ disable_guest() {
     log_action "Created /etc/lightdm/lightdm.conf.d/50-no-guest.conf"
   fi
 
-  # MDM (Mint Display Manager - older Mint versions)
-  if [ -f /etc/mdm/mdm.conf ]; then
-    backup_file /etc/mdm/mdm.conf
-    if ! grep -q "^AllowGuest=false" /etc/mdm/mdm.conf; then
-      if grep -q "^\[security\]" /etc/mdm/mdm.conf; then
-        sed -i '/^\[security\]/a AllowGuest=false' /etc/mdm/mdm.conf
-      else
-        echo -e "\n[security]\nAllowGuest=false" >> /etc/mdm/mdm.conf
-      fi
-      log_action "Disabled guest account in MDM"
-    fi
-  fi
-
-  # Cinnamon Desktop (Mint Cinnamon edition) - Disable guest session
-  # Note: Cinnamon uses LightDM or GDM as display manager, handled above
-  # Additional Cinnamon-specific settings via gsettings
-  if command -v cinnamon-session &>/dev/null; then
-    # Try to disable guest for all users via dconf system-db
-    mkdir -p /etc/dconf/db/local.d 2>/dev/null
-    cat > /etc/dconf/db/local.d/00-disable-guest <<'EOF'
-[org/cinnamon/desktop/session]
-session-manager-uses-logind=true
-EOF
-
-    # Update dconf database
-    if command -v dconf &>/dev/null; then
-      dconf update 2>/dev/null
-      log_action "Updated Cinnamon dconf settings to harden guest access"
-    fi
+  # Update dconf database
+  if command -v dconf &>/dev/null; then
+    dconf update 2>/dev/null
+    log_action "Updated Cinnamon dconf settings to harden guest access"
   fi
 
   # GDM3 Display Manager (if used in some Mint configurations)
@@ -356,162 +364,20 @@ disallow_empty_passwords() {
 
   log_action "Disallowed empty user passwords"
 }
-#install password modules required for PAM if not found
-pkg_install_pam_modules() {
-  log_action "Installing required PAM modules if missing"
-
-  local -a pkgs=()
-
-  ls /lib/*/security/pam_pwquality.so >/dev/null 2>&1 || pkgs+=("libpam-pwquality")
-  ls /lib/*/security/pam_faillock.so  >/dev/null 2>&1 || pkgs+=("libpam-modules")
-  command -v faillock >/dev/null 2>&1 || pkgs+=("libpam-modules-bin")
-
-  if (( ${#pkgs[@]} )); then
-    apt-get update -y -qq &>/dev/null
-    if apt-get install -y -qq "${pkgs[@]}" &>/dev/null; then
-      log_action "Installed: ${pkgs[*]}"
-    else
-      log_action "ERROR: failed to install: ${pkgs[*]}"
-      exit 1
-    fi
-  else
-    log_action "PAM modules already present"
-  fi
-
-  for mod in pam_pwquality.so pam_pwhistory.so pam_faillock.so; do
-    if ! ls /lib/*/security/"$mod" >/dev/null 2>&1; then
-      log_action "ERROR: missing $mod even after install"
-      exit 1
-    fi
-  done
-}
-
-configure_pwquality_conf() {
-  log_action "Configuring /etc/security/pwquality.conf"
-  local file="/etc/security/pwquality.conf"
-  backup_file "$file"
-
-  declare -A want=(
-    [minlen]="12"
-    [maxrepeat]="3"
-    [ucredit]="-1"
-    [lcredit]="-1"
-    [dcredit]="-1"
-    [ocredit]="-1"
-    [difok]="3"
-    [reject_username]="1"
-    [enforce_for_root]="1"
-  )
-
-  local tmp
-  tmp="$(mktemp)"
-
-  if [[ -f "$file" ]]; then
-    # keep unrelated lines, drop the keys we manage
-    grep -Ev '^[[:space:]]*(minlen|maxrepeat|ucredit|lcredit|dcredit|ocredit|difok|reject_username|enforce_for_root)[[:space:]]*=' "$file" \
-      >"$tmp" || true
-  fi
-
-  {
-    echo "# Managed by hardening script on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    for k in "${!want[@]}"; do
-      printf "%s = %s\n" "$k" "${want[$k]}"
-    done
-  } >>"$tmp"
-
-  install -m 0644 "$tmp" "$file"
-  rm -f "$tmp"
-  log_action "pwquality.conf updated"
-}
-
 
 configure_pam() {
-  log_action "=== CONFIGURING PAM: complexity, history, lockout ==="
-
-  pkg_install_pam_modules
-
-  # common-password: pwquality then pwhistory, then existing pam_unix.so
+  log_action "=== CONFIGURING PAM: PWD COMPLEXITY, HISTORY, & ACCOUNT LOCKOUT ==="
+  
+  apt install -y libpam-pwquality libpam-modules libpam-modules-bin &>/dev/null
+  
   backup_file /etc/pam.d/common-password
-  local pwfile="/etc/pam.d/common-password"
-  local tmp
-  tmp="$(mktemp)"
-
-  # lines to enforce
-  local pwq_line="password required pam_pwquality.so try_first_pass retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root"
-  local pwh_line="password required pam_pwhistory.so remember=5 enforce_for_root use_authtok"
-
-  awk -v pwq="$pwq_line" -v pwh="$pwh_line" '
-    BEGIN { injected=0 }
-    /pam_pwquality\.so/ { next }
-    /pam_pwhistory\.so/ { next }
-    /^password/ && /pam_unix\.so/ && injected==0 {
-      print pwq
-      print pwh
-      print
-      injected=1
-      next
-    }
-    { print }
-    END {
-      if (injected==0) {
-        print pwq
-        print pwh
-      }
-    }
-  ' "$pwfile" > "$tmp"
-
-  install -m 0644 "$tmp" "$pwfile"
-  rm -f "$tmp"
-
-  # make sure pam_unix.so does not allow empty passwords
-  sed -i 's/\(\bpam_unix\.so[^#]*\)\bnullok\b/\1/g' "$pwfile"
-
-  log_action "common-password updated"
-
-  # common-auth: faillock around pam_unix
-  backup_file /etc/pam.d/common-auth
-  local aufile="/etc/pam.d/common-auth"
-  tmp="$(mktemp)"
-
-  local preauth="auth required    pam_faillock.so preauth silent deny=5 unlock_time=1800"
-  local authfail="auth [default=die] pam_faillock.so authfail deny=5 unlock_time=1800"
-  local authsucc="auth sufficient  pam_faillock.so authsucc"
-
-  awk -v pre="$preauth" -v fail="$authfail" -v succ="$authsucc" '
-    BEGIN { injected=0 }
-    /pam_faillock\.so/ { next }
-    /^auth/ && /pam_unix\.so/ && injected==0 {
-      print pre
-      print
-      print fail
-      print succ
-      injected=1
-      next
-    }
-    { print }
-    END {
-      if (injected==0) {
-        print pre
-        print fail
-        print succ
-      }
-    }
-  ' "$aufile" > "$tmp"
-
-  install -m 0644 "$tmp" "$aufile"
-  rm -f "$tmp"
-  log_action "common-auth updated"
-
-  # common-account: ensure faillock account check is present
-  backup_file /etc/pam.d/common-account
-  if ! grep -qE '^[[:space:]]*account[[:space:]]+required[[:space:]]+pam_faillock\.so' /etc/pam.d/common-account; then
-    echo "account required pam_faillock.so" >> /etc/pam.d/common-account
-    log_action "Added faillock to common-account"
-  else
-    log_action "faillock already present in common-account"
-  fi
-
-  log_action "PAM configuration complete"
+  sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
+  log_action "Configured password complexity requirements"
+  
+  sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
+  sed -i '/pam_unix.so/a password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
+  log_action "Configured password history (remember=5)"
 }
 
 set_password_aging() {
@@ -534,10 +400,10 @@ set_password_aging() {
   fi
 
   # pwd expiration warning
-  if grep -q "^PASS_WARN_DAYS" /etc/login.defs; then
-    sed -i 's/^PASS_WARN_DAYS.*/PASS_WARN_DAYS   7/' /etc/login.defs &>/dev/null
+  if grep -q "^PASS_WARN_AGE" /etc/login.defs; then
+    sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE   7/' /etc/login.defs &>/dev/null
   else
-    echo "PASS_WARN_DAYS   7" >>/etc/login.defs
+    echo "PASS_WARN_AGE   7" >>/etc/login.defs
   fi
 
   log_action "Set password aging: max=14 days, min=5 days, warn=7 days"
@@ -643,56 +509,179 @@ fix_sudoers_nopasswd() {
 
 find_world_writable_files() {
   log_action "=== CHECKING FOR WORLD-WRITABLE FILES ==="
-  # meaning anyone can modify which is sec risk
-
-  WRITABLE=$(find / -path /proc -prune -o -path /sys -prune -o -type f -perm -0002 -print 2>/dev/null)
-
-  if [ -n "$WRITABLE" ]; then
-    log_action "WARNING: Found world-writable files:"
-    echo "$WRITABLE" | while read file; do
-      log_action " - $file"
-      # chmod o-w "$file"
-      # ^ optional to remove world write
-    done
-  else
-    log_action "No suspicious world-writable files found"
-  fi
+  
+  local exclude_paths=(
+    -path /proc -prune -o
+    -path /sys -prune -o
+    -path /dev -prune -o
+    -path /run -prune -o
+    -path /tmp -prune -o
+    -path /var/tmp -prune -o
+    -path /var/crash -prune -o
+    -path /var/lock -prune -o
+    -path /var/spool -prune -o
+    -path /snap -prune -o
+    -path '/home/*/.cache' -prune -o
+    -path '/home/*/.local/share/Trash' -prune -o
+  )
+  
+  log_action "Scanning for suspicious world-writable files (excluding system paths)..."
+  
+  while IFS= read -r file; do
+    # Additional filtering - skip if in /home and owned by regular user
+    if [[ "$file" =~ ^/home/ ]]; then
+      local file_owner=$(stat -c '%U' "$file" 2>/dev/null)
+      local file_dir=$(dirname "$file")
+      # Skip if file is in user's own directory and owned by them
+      if [[ "$file_dir" =~ ^/home/$file_owner ]]; then
+        continue
+      fi
+    fi
+    log_action "  WORLD-WRITABLE: $file"
+    log_action "    Owner: $(stat -c '%U:%G' "$file" 2>/dev/null)"
+    log_action "    Perms: $(stat -c '%a' "$file" 2>/dev/null)"
+  done < <(find / "${exclude_paths[@]}" -type f -perm -0002 -print 2>/dev/null)
+  log_action "  To fix: chmod o-w /path/to/file"
 }
 
 check_suid_sgid() {
   log_action "=== CHECKING SUID/SGID BINARIES ==="
 
-  # list of legit SUID bins (ADJUST)
-  LEGIT_SUID=(
+  local LEGIT_SUID=(
+    # Core system binaries
     "/bin/su"
     "/bin/sudo"
     "/usr/bin/sudo"
     "/bin/mount"
     "/bin/umount"
+    "/usr/bin/mount"
+    "/usr/bin/umount"
+    
+    # Password management
     "/usr/bin/passwd"
     "/usr/bin/gpasswd"
     "/usr/bin/newgrp"
     "/usr/bin/chfn"
     "/usr/bin/chsh"
+    "/usr/bin/expiry"
+    "/usr/bin/chage"
+    
+    # Network utilities
+    "/bin/ping"
+    "/usr/bin/ping"
+    "/usr/bin/ping6"
+    "/bin/ping6"
+    "/usr/sbin/pppd"
+    
+    # Filesystem utilities
+    "/usr/bin/fusermount"
+    "/usr/bin/fusermount3"
+    "/bin/fusermount"
+    "/usr/bin/ntfs-3g"
+    
+    # Policy/privilege escalation
+    "/usr/bin/pkexec"
+    "/usr/lib/policykit-1/polkit-agent-helper-1"
+    "/usr/lib/x86_64-linux-gnu/polkit-1/polkit-agent-helper-1"
+    
+    # D-Bus
     "/usr/lib/dbus-1.0/dbus-daemon-launch-helper"
+    "/usr/lib/dbus-1/dbus-daemon-launch-helper"
+    
+    # SSH
     "/usr/lib/openssh/ssh-keysign"
+    
+    # Desktop environment
+    "/usr/lib/xorg/Xorg.wrap"
+    "/usr/bin/Xorg"
+    
+    # CUPS printing
+    "/usr/lib/cups/backend/cups-pdf"
+    
+    # Other common legitimate binaries
+    "/usr/bin/at"
+    "/usr/bin/crontab"
+    "/usr/bin/wall"
+    "/usr/bin/write"
+    "/usr/sbin/unix_chkpwd"
+    "/usr/sbin/pam_timestamp_check"
+    "/sbin/unix_chkpwd"
   )
-
-  find / -path /proc -prune -o -type f \( -perm -4000 -o -perm -2000 \) -print 2>/dev/null | while read file; do
-    if [[ ! " ${LEGIT_SUID[@]} " =~ " ${file} " ]]; then
+  
+  local count=0
+  local suspicious_count=0
+  
+  local exclude_paths=(
+    -path /proc -prune -o
+    -path /sys -prune -o
+    -path /snap -prune -o
+    -path '/var/lib/snapd' -prune -o
+  )
+  
+  log_action "Scanning for SUID/SGID binaries..."
+  
+  while IFS= read -r file; do
+    ((count++))
+    local is_legit=false
+    for legit in "${LEGIT_SUID[@]}"; do
+      if [[ "$file" == "$legit" ]]; then
+        is_legit=true
+        break
+      fi
+    done
+    
+    if [ "$is_legit" = false ]; then
+      ((suspicious_count++))
       log_action "SUSPICIOUS SUID/SGID: $file"
-      # Optional to remove SUID bit
-      # chmod u-s "$file"
+      
+      local perms=$(stat -c '%a' "$file" 2>/dev/null)
+      local owner=$(stat -c '%U:%G' "$file" 2>/dev/null)
+      local package=$(dpkg -S "$file" 2>/dev/null | cut -d: -f1 || echo "unknown")
+
+      log_action "    Permissions: $perms"
+      log_action "    Owner: $owner"
+      log_action "    Package: $package"
+      log_action "    To remove SUID: chmod u-s $file"
+      log_action "    To remove SGID: chmod g-s $file"
     fi
-  done
+  done < <(find / "${exclude_paths[@]}" -type f \( -perm -4000 -o -perm -2000 \) -print 2>/dev/null)
+  
+  log_action ""
+  log_action "SUID/SGID Summary:"
+  log_action "  Total SUID/SGID binaries found: $count"
+  log_action "  Suspicious binaries: $suspicious_count"
 }
 
 find_orphaned_files() {
   log_action "=== CHECKING FOR ORPHANED FILES ==="
-
-  find / -path /proc -prune -o -nouser -o -nogroup -print 2>/dev/null | while read file; do
-    log_action "ORPHANED FILE: $file"
-  done
+  local count=0
+  
+  local exclude_paths=(
+    -path /proc -prune -o
+    -path /sys -prune -o
+    -path /dev -prune -o
+    -path /run -prune -o
+    -path /snap -prune -o
+    -path '/var/lib/snapd' -prune -o
+    -path '/var/lib/docker' -prune -o
+    -path '/var/cache' -prune -o
+    -path '/tmp' -prune -o
+    -path '/var/tmp' -prune -o
+  )
+  
+  log_action "Scanning for Orphaned Files (files without valid owner or group)..."
+  
+  while IFS= read -r file; do
+    ((count++))
+    local uid=$(stat -c '%u' "$file" 2>/dev/null)
+    local gid=$(stat -c '%g' "$file" 2>/dev/null)
+    local perms=$(stat -c '%a' "$file" 2>/dev/null)
+    
+    log_action "  ORPHANED: $file"
+    log_action "    UID: $uid (no user), GID: $gid"
+    log_action "    Permissions: $perms"
+    log_action "    To fix: chown root:root $file"
+  done < <(find / "${exclude_paths[@]}" \( -nouser -o -nogroup \) -print 2>/dev/null)
 }
 
 #===============================================
@@ -736,7 +725,7 @@ EOF
   log_action "Removed any malicious redirects or blocking entries"
 }
 
-# REQUIRES OpenSSH Sever Service to be installed (should be by default)
+# REQUIRES OpenSSH Server Service to be installed (should be by default)
 harden_ssh() {
   log_action "=== HARDENING SSH CONFIGURATION ==="
 
@@ -782,7 +771,7 @@ enable_tcp_syncookies() {
 
   if grep -q "^.*net.ipv4.tcp_syncookies" /etc/sysctl.conf; then
     sed -i 's/^#.*net.ipv4.tcp_syncookies.*/net.ipv4.tcp_syncookies=1/' /etc/sysctl.conf
-    log_action "Uncommented and enable TCP SYN cookies"
+    log_action "Uncommented and enabled TCP SYN cookies"
   elif grep -q "^net.ipv4.tcp_syncookies" /etc/sysctl.conf; then
     sed -i 's/^.*net.ipv4.tcp_syncookies.*/net.ipv4.tcp_syncookies=1/' /etc/sysctl.conf
     log_action "Enabled TCP SYN cookies"
@@ -799,7 +788,6 @@ harden_kernel_sysctl() {
 
   backup_file /etc/sysctl.conf
 
-  # still  need explanation of whats going on
   cat >>/etc/sysctl.conf <<'EOF'
 fs.file-max = 65535
 fs.protected_fifos = 2
@@ -846,7 +834,7 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 
-# Incase IPv6 is necessary
+# In case IPv6 is necessary
 net.ipv6.conf.default.router_solicitations = 0
 net.ipv6.conf.default.accept_ra_rtr_pref = 0
 net.ipv6.conf.default.accept_ra_pinfo = 0
@@ -874,15 +862,6 @@ EOF
 # Firewall
 #===============================================
 
-enable_ufw() {
-  log_action "=== ENABLING UNCOMPLICATED FIREWALL (UFW)==="
-
-  if ufw status | grep -q "inactive"; then
-    ufw --force enable
-    log_action "UFW has been enabled"
-  fi
-}
-
 configure_firewall() {
   log_action "=== CONFIGURING UFW FIREWALL ==="
 
@@ -908,12 +887,8 @@ configure_firewall() {
   ufw default deny routed
   log_action "Set default policies"
 
-  # ADD SERVICE SPECIFIC RULES BASED ON README
-  # ie: allow http, https, mysql, ssh, etc
-  # sudo ufw allow ssh
-  # sudo ufw reload
-  # sudo systemctl enable ssh
-  # sudo systemctl start ssh
+  ufw --force enable
+  log_action "UFW enabled"
 
   log_action "Firewall configuration complete"
 }
@@ -1053,24 +1028,57 @@ remove_prohibited_media() {
   log_action "=== SCANNING FOR PROHIBITED MEDIA FILES ==="
 
   MEDIA_EXTENSIONS=(
-    "*.mp3"
-    "*.mp4"
-    "*.avi"
-    "*.mkv"
-    "*.mov"
-    "*.flv"
-    "*.wmv"
-    "*.wav"
-    "*.flag"
-    "*.ogg"
-    "*.m4a"
-    "*.aac"
+      # Audio formats
+      "*.mp3"
+      "*.ogg"
+      "*.wav"
+      "*.m4a"
+      "*.aac"
+      "*.wma"
+      "*.flac"
+      
+      # Video formats
+      "*.mp4"
+      "*.avi"
+      "*.mkv"
+      "*.mov"
+      "*.flv"
+      "*.wmv"
+      "*.webm"
+      "*.mpeg"
+      "*.mpg"
+      "*.3gp"
+      
+      # Archive formats (for prohibited software)
+      "*.zip"
+      "*.tar"
+      "*.tar.gz"
+      "*.tgz"
+      "*.rar"
+      "*.7z"
+      "*.bz2"
+      "*.xz"
+      
+      # Image formats (sometimes prohibited)
+      "*.jpg"
+      "*.jpeg"
+      "*.png"
+      "*.gif"
+      "*.bmp"
+      "*.tiff"
+      "*.webp"
+      
+      # Other suspicious files
+      "*.flag"
+      "*.torrent"
   )
 
+  log_action "NOTE: MAKE SURE TO MANUALLY REVIEW THIS SECTION"
+  log_action ""
   for ext in "${MEDIA_EXTENSIONS[@]}"; do
     find /home -type f -name "$ext" 2>/dev/null | while read file; do
-      log_action "PROHIBITED MEDIA: $file"
-      rm -f "$file"
+      log_action "PROHIBITED MEDIA FOUND: $file"
+      # rm -f "$file"
     done
   done
 
@@ -1228,11 +1236,10 @@ run_rootkit_scans() {
 }
 
 #==============================================
-# Auditd
+# System Auditing
 #==============================================
-
 harden_auditd() {
-  log_action "=== HARDENING AUDITD (SYSTEM AUDITING) ==="
+  log_action "=== HARDENING AUDITD ==="
 
   # Install auditd
   if ! command -v auditctl &>/dev/null; then
@@ -1337,67 +1344,34 @@ EOF
   log_action "auditd hardening complete"
 }
 
+enable_app_armor() {
+  log_action "=== ENABLING APP ARMOR ==="
+
+  log_action "Installing AppArmor packages"
+
+  if apt install -y apparmor apparmor-utils apparmor-profiles &>/dev/null; then
+    log_action "Installed successfully"
+  else
+    log_action "WARNING: Failed to fully install AppArmor packages"
+  fi
+
+  systemctl enable apparmor && systemctl start apparmor
+  log_action "App Armor has been enabled"
+}
+
 #===============================================
 # Lynis
 #===============================================
 audit_with_lynis() {
   log_action "=== RUNNING LYNIS SECURITY AUDIT ==="
 
-  # Change to /usr/local for installation
-  if ! cd /usr/local 2>/dev/null; then
-    log_action "ERROR: Failed to change directory to /usr/local"
-    return 1
-  fi
+  apt install -y -qq lynis &>/dev/null
 
-  # Clone Lynis repository
-  log_action "Cloning Lynis repository from GitHub..."
-  if git clone https://github.com/CISOfy/lynis &>/dev/null; then
-    log_action "Lynis repository cloned successfully"
-  else
-    log_action "ERROR: Failed to clone Lynis repository"
-    log_action "Checking if Lynis already exists..."
-    if [ -d /usr/local/lynis ]; then
-      log_action "Lynis directory already exists, proceeding..."
-    else
-      return 1
-    fi
-  fi
-
-  # Set secure ownership (root:root)
-  log_action "Setting ownership to root:root for security..."
-  chown -R 0:0 /usr/local/lynis &>/dev/null
-  log_action "Ownership configured securely"
-
-  # Change to Lynis directory
-  if ! cd /usr/local/lynis 2>/dev/null; then
-    log_action "ERROR: Failed to enter /usr/local/lynis directory"
-    return 1
-  fi
-
-  # Run full system audit
-  log_action "Running Lynis system audit (this will take several minutes)..."
-  ./lynis audit system &>/dev/null
+  log_action "Running Lynis system audit..."
+  lynis audit system &>/dev/null
   log_action "Lynis audit completed"
 
-  # Extract and log warnings/suggestions
-  log_action "Extracting security recommendations from Lynis report..."
-  if [ -f /var/log/lynis-report.dat ]; then
-    log_action "========== Lynis Warnings =========="
-    grep 'warning\[\]=' /var/log/lynis-report.dat 2>/dev/null | sed 's/warning\[\]=//g' >>"$LOG_FILE"
-
-    log_action "========== Lynis Suggestions =========="
-    grep 'suggestion\[\]=' /var/log/lynis-report.dat 2>/dev/null | sed 's/suggestion\[\]=//g' >>"$LOG_FILE"
-
-    # Count findings
-    local warnings=$(grep -c 'warning\[\]=' /var/log/lynis-report.dat 2>/dev/null || echo "0")
-    local suggestions=$(grep -c 'suggestion\[\]=' /var/log/lynis-report.dat 2>/dev/null || echo "0")
-
-    log_action "Lynis found $warnings warnings and $suggestions suggestions"
-    log_action "Full report available at: /var/log/lynis-report.dat"
-  else
-    log_action "WARNING: Lynis report not found at /var/log/lynis-report.dat"
-  fi
-
+  log_action "Full report available at: /var/log/lynis-report.dat"
   log_action "Lynis security audit completed"
 }
 
@@ -1418,32 +1392,27 @@ main() {
   log_action "Timestamp: $(date)"
   log_action ""
 
-  # 1. SYSTEM UPDATES (Do this first for security patches)
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
   update_system
-  update_packages
   configure_automatic_updates
+  enable_auto_update_refresh
   log_action ""
 
-  # 2. USER MANAGEMENT
   log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
   remove_unauthorized_users
   fix_admin_group
   check_uid_zero
   disable_guest
   set_all_user_passwords
-  log_action ""
   lock_root_account
+  log_action ""
 
-  # 3. PASSWORD POLICIES
   log_action "[ PHASE 3: PASSWORD POLICIES ]"
   disallow_empty_passwords
-  configure_pwquality_conf
   configure_pam
   set_password_aging
   log_action ""
 
-  # 4. FILE PERMISSIONS & AUDITING
   log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
   secure_file_permissions
   fix_sudoers_nopasswd
@@ -1452,47 +1421,39 @@ main() {
   find_orphaned_files
   log_action ""
 
-  # 5. NETWORK SECURITY
   log_action "[ PHASE 5: NETWORK SECURITY ]"
   fix_hosts_file
   harden_ssh
   harden_kernel_sysctl
   log_action ""
 
-  # 6. FIREWALL CONFIGURATION
   log_action "[ PHASE 6: FIREWALL ]"
-  enable_ufw
   configure_firewall
   log_action ""
 
-  # 7. SERVICE MANAGEMENT
   log_action "[ PHASE 7: SERVICE MANAGEMENT ]"
   disable_unnecessary_services "./service_blacklist.txt"
   audit_running_services
   log_action ""
 
-  # 8. PACKAGE AUDITING & REMOVAL
   log_action "[ PHASE 8: SOFTWARE AUDITING ]"
   remove_unauthorized_software "./package_blacklist.txt"
   remove_prohibited_media
   log_action ""
 
-  # 9. CRON SECURITY
   log_action "[ PHASE 9: CRON SECURITY ]"
   secure_cron_system
   log_action ""
 
-  # 10. SYSTEM AUDITING
   log_action "[ PHASE 10: SYSTEM AUDITING ]"
   harden_auditd
+  enable_app_armor
   log_action ""
 
-  # 11. ANTIVIRUS & ROOTKIT DETECTION
   log_action "[ PHASE 11: MALWARE DETECTION ]"
   run_rootkit_scans
   log_action ""
 
-  # 12. COMPREHENSIVE SECURITY AUDIT
   log_action "[ PHASE 12: LYNIS AUDIT ]"
   audit_with_lynis
   log_action ""
