@@ -460,6 +460,15 @@ secure_file_permissions() {
   [ -d /etc/ssl/private ] && chmod 710 /etc/ssl/private && chown root:ssl-cert /etc/ssl/private
   log_action "Secured SSL private key directory"
 
+  # FTP Root directory (vsftp)
+  for ftp_root in /srv/ftp /var/ftp; do 
+    if [ -d "$ftp_root"]; then
+      chmod 755 "$ftp_root"
+      chown root:ftp "$ftp_root"
+      log_action "Secured FTP root directory: $ftp_root"
+    fi 
+  done
+
   log_action "File perms hardening complete"
 }
 
@@ -1053,6 +1062,47 @@ remove_prohibited_media() {
 }
 
 #===============================================
+# Service Hardening
+#===============================================
+
+harden_vsftp() {
+  log_action "=== HARDENING VSFTP ==="
+  
+  if [! -f /etc/vsftp.conf]; then
+    log_action "vsftp not installed, skipping"
+    return
+  fi
+  
+  backup_file /etc/vsftp.conf
+
+  set_vsftpd_option() {
+    local option="$1"
+    local value="$2"
+    if grep -q "^#*${option}=" /etc/vsftp.conf; then
+      sed -i "s/v#*${option}=.*/${option}=${value}/" /etc/vsftp.conf
+    else
+      echo ${option}=${value} >> /etc/vsftp.conf
+    fi
+    log_action "Set ${option}=${value}"
+  }
+
+  set_vsftpd_option "ssl_enable" "yes"
+  set_vsftpd_option "force_local_logins_ssl" "YES"
+  set_vsftpd_option "force_local_data_ssl" "YES"
+  set_vsftpd_option "ssl_tlsv1" "YES"
+  set_vsftpd_option "ssl_sslv2" "NO"
+  set_vsftpd_option "ssl_sslv3" "NO"
+
+  set_vsftpd_option "anonymous_enable" "NO"
+  set_vsftpd_option "local_enable" "YES"
+  set_vsftpd_option "write_enable" "YES"
+  set_vsftpd_option "chroot_local_user" "YES"
+  set_vsftpd_option "allow_writable_chroot" "YES"
+
+  log_action "vsftpd hardening complete"
+}
+
+#===============================================
 # Cronjobs
 #===============================================
 
@@ -1410,21 +1460,25 @@ main() {
   remove_prohibited_media
   log_action ""
 
-  log_action "[ PHASE 9: CRON SECURITY ]"
+  log_action "[ PHASE 9: SERVICE HARDENING ]"
+  harden_vsftp
+  log_action ""
+
+  log_action "[ PHASE 10: CRON SECURITY ]"
   secure_cron_system
   log_action ""
 
-  log_action "[ PHASE 10: MALWARE DETECTION ]"
+  log_action "[ PHASE 11: MALWARE DETECTION ]"
   run_rootkit_scans
   log_action ""
 
-  log_action "[ PHASE 11: SYSTEM AUDITING ]"
+  log_action "[ PHASE 12: SYSTEM AUDITING ]"
   harden_auditd
   enable_app_armor
   log_action ""
 
   # 12. COMPREHENSIVE SECURITY AUDIT
-  log_action "[ PHASE 12: LYNIS AUDIT ]"
+  log_action "[ PHASE 13: LYNIS AUDIT ]"
   audit_with_lynis
   log_action ""
 
