@@ -325,3 +325,7 @@ xprobe2
 nginx
 aisleriot
 thunderbird
+cain
+teamviewer
+anydesk
+logmein-hamachi
