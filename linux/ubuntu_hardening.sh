@@ -430,6 +430,11 @@ secure_file_permissions() {
   [ -f /etc/passwd ] && chmod 644 /etc/passwd && chown root:root /etc/passwd &>/dev/null
   [ -f /etc/shadow ] && chmod 640 /etc/shadow && chown root:shadow /etc/shadow &>/dev/null
   [ -f /etc/group ] && chmod 644 /etc/group && chown root:root /etc/group &>/dev/null
+  [ -f /etc/sudoers ] && chmod 644 /etc/sudoers && chown root:root /etc/sudoers &>/dev/null
+  [ -f /etc/sudoers.d ] && chmod 644 /etc/sudoers.d && chown root:root /etc/sudoers.d &>/dev/null
+  [ -f /etc/fstab ] && chmod 644 /etc/fstab && chown root:root /etc/fstab &>/dev/null
+  [ -f /etc/hosts ] && chmod 644 /etc/hosts && chown root:root /etc/hosts &>/dev/null
+  [ -f /etc/ssh/sshd_config ] && chmod 644 /etc/ssh/sshd_config && chown root:root /etc/ssh/sshd_config &>/dev/null
   [ -f /etc/gshadow ] && chmod 640 /etc/gshadow && chown root:shadow /etc/gshadow &>/dev/null
   [ -f /etc/security/opasswd ] && chmod 600 /etc/security/opasswd && chown root:root /etc/security/opasswd &>/dev/null
 
@@ -549,6 +554,59 @@ find_world_writable_files() {
     log_action "    Perms: $(stat -c '%a' "$file" 2>/dev/null)"
   done < <(find / "${exclude_paths[@]}" -type f -perm -0002 -print 2>/dev/null)
   log_action "  To fix: chmod o-w /path/to/file"
+}
+
+fix_ssh_key_permissions() {
+  log_action "=== FIXING SSH KEY PERMISSIONS ==="
+
+  if [ -d /etc/ssh ]; then
+    find /etc/ssh -maxdepth 1 -type f -name "ssh_host_*_key" 2>/dev/null | while read key; do
+      chown root:root "$key" 2>/dev/null
+      chmod 600 "$key" 2>/dev/null
+      log_action "Fixed host private key perms: $key"
+    done
+
+    find /etc/ssh -maxdepth 1 -type f -name "ssh_host_*_key.pub" 2>/dev/null | while read key; do
+      chown root:root "$key" 2>/dev/null
+      chmod 644 "$key" 2>/dev/null
+      log_action "Fixed host public key perms: $key"
+    done
+  fi
+
+  awk -F: '$3>=1000 && $1!="nobody"{print $1":"$6}' /etc/passwd | while IFS=":" read -r user home; do
+    [ -d "$home" ] || continue
+
+    if [ -d "$home/.ssh" ]; then
+      chown -R "$user":"$user" "$home/.ssh" 2>/dev/null
+      chmod 700 "$home/.ssh" 2>/dev/null
+
+      find "$home/.ssh" -type f \( -name "id_*" -o -name "*_key" \) ! -name "*.pub" 2>/dev/null | while read key; do
+        chmod 600 "$key" 2>/dev/null
+        log_action "Fixed private key perms for $user: $key"
+      done
+
+      find "$home/.ssh" -type f -name "*.pub" 2>/dev/null | while read key; do
+        chmod 644 "$key" 2>/dev/null
+        log_action "Fixed public key perms for $user: $key"
+      done
+
+      if [ -f "$home/.ssh/authorized_keys" ]; then
+        chmod 600 "$home/.ssh/authorized_keys" 2>/dev/null
+        log_action "Secured authorized_keys for $user"
+      fi
+    fi
+  done
+
+  log_action "SSH key permission hardening complete"
+}
+
+check_home_permissions(){
+  log_actions "=== Fixing home directory permissions ==="
+
+  chmod 750 "$home" 2>/dev/null
+  chown "$user":"$user" "$home" 2>/dev/null
+  log_action " Fixed home directory permissions"
+
 }
 
 check_suid_sgid() {
@@ -1471,6 +1529,7 @@ main() {
 
   log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
   secure_file_permissions
+  check_home_permissions
   fix_sudoers_nopasswd
   find_world_writable_files
   check_suid_sgid
