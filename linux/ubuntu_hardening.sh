@@ -1134,40 +1134,58 @@ remove_prohibited_media() {
 # Service Hardening
 #===============================================
 
-harden_vsftp() {
-  log_action "=== HARDENING VSFTP ==="
-  
-  if [! -f /etc/vsftp.conf]; then
-    log_action "vsftp not installed, skipping"
-    return
+harden_vsftpd() {
+  log_action "=== HARDENING VSFTPD ==="
+
+  # Correct config path
+  local conf="/etc/vsftpd.conf"
+
+  # Ensure vsftpd is installed
+  if ! dpkg -l | grep -q "^ii  vsftpd"; then
+    log_action "vsftpd not installed, installing..."
+    apt install -y vsftpd &>/dev/null
   fi
-  
-  backup_file /etc/vsftp.conf
+  # update vsftpd to latest version
+  apt update vsftpd &>/dev/null
+
+  # Now check for proper config file
+  if [ ! -f "$conf" ]; then
+    log_action "vsftpd installed but $conf missing, creating new config"
+    touch "$conf"
+  fi
+
+  backup_file "$conf"
 
   set_vsftpd_option() {
     local option="$1"
     local value="$2"
-    if grep -q "^#*${option}=" /etc/vsftp.conf; then
-      sed -i "s/v#*${option}=.*/${option}=${value}/" /etc/vsftp.conf
+    if grep -q "^${option}=" "$conf"; then
+      sed -i "s/^${option}=.*/${option}=${value}/" "$conf"
     else
-      echo ${option}=${value} >> /etc/vsftp.conf
+      echo "${option}=${value}" >> "$conf"
     fi
     log_action "Set ${option}=${value}"
   }
 
-  set_vsftpd_option "ssl_enable" "yes"
+  # SSL settings
+  set_vsftpd_option "ssl_enable" "YES"
   set_vsftpd_option "force_local_logins_ssl" "YES"
   set_vsftpd_option "force_local_data_ssl" "YES"
   set_vsftpd_option "ssl_tlsv1" "YES"
   set_vsftpd_option "ssl_sslv2" "NO"
   set_vsftpd_option "ssl_sslv3" "NO"
 
+  # Access control
   set_vsftpd_option "anonymous_enable" "NO"
   set_vsftpd_option "local_enable" "YES"
   set_vsftpd_option "write_enable" "YES"
   set_vsftpd_option "chroot_local_user" "YES"
-  set_vsftpd_option "allow_writable_chroot" "YES"
 
+  # Prevent writable chroot issues
+  set_vsftpd_option "allow_writeable_chroot" "YES"
+
+  # Restart to apply changes
+  systemctl restart vsftpd &>/dev/null
   log_action "vsftpd hardening complete"
 }
 
