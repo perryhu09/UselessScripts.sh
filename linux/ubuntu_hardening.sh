@@ -99,6 +99,16 @@ enable_security_updates() {
 enable_auto_update_refresh() {
     log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
 
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/10periodic >/dev/null
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+
     systemctl enable --now apt-daily.timer &>/dev/null
     systemctl enable --now apt-daily-upgrade.timer &>/dev/null
 

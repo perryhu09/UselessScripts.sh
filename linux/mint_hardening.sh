@@ -98,6 +98,18 @@ enable_security_updates() {
 enable_auto_update_refresh() {
     log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
 
+    USERNAME=$(ls /home | head -n 1)
+    USERPATH="/com/linuxmint/${USERNAME}" #is this right for all linux mint images?
+
+    apt-get update -y
+    apt-get install -y dconf-cli
+
+    sudo -u "$USERNAME" dconf write "${USERPATH}/refresh-schedule-enabled" true
+    sudo -u "$USERNAME" dconf write "${USERPATH}/refresh-schedule-id" "'DAILY_MNT'"
+
+    gsettings set org.cinnamon.updates refresh-package-lists true
+    gsettings set org.cinnamon.updates refresh-frequency 1  # 1 = Daily
+
     systemctl enable --now apt-daily.timer &>/dev/null
     systemctl enable --now apt-daily-upgrade.timer &>/dev/null
 
