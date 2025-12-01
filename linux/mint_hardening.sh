@@ -22,7 +22,6 @@ if [ -n "$SUDO_USER" ]; then
 else
   ACTUAL_USER_HOME="$HOME"
 fi
-
 LOG_FILE="$ACTUAL_USER_HOME/Desktop/hardening.log"
 
 # Logging Function
@@ -40,6 +39,7 @@ backup_file() {
     log_action "Backed up $1"
   fi
 }
+
 #===============================================
 # Pre-Flight Checklist
 #===============================================
@@ -58,7 +58,7 @@ preflight_check() {
   echo "[] 5. Remove any required services from the README in service_blacklist.txt"
   echo "[] 6. Remove any required packages from the README in packages_blacklist.txt"
   echo ""
-  echo "This script is mint_hardening.sh, it is supposed to be run on LINUX MINT"
+  echo "This script is mint_hardening.sh, it is supposed to be run on Linux Mint (Ubuntu base)"
   echo ""
   read -p "Have you completed ALL items on the checklist above? (print initials)" confirm1
   if [[ ! "$confirm1" == "DH" ]]; then
@@ -84,6 +84,7 @@ preflight_check() {
 
 enable_security_updates() {
     log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
+
     sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
 
     CODENAME="$(lsb_release -sc)"
@@ -98,17 +99,15 @@ enable_security_updates() {
 enable_auto_update_refresh() {
     log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
 
-    USERNAME=$(ls /home | head -n 1)
-    USERPATH="/com/linuxmint/${USERNAME}" #is this right for all linux mint images?
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/10periodic >/dev/null
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
 
-    apt-get update -y
-    apt-get install -y dconf-cli
-
-    sudo -u "$USERNAME" dconf write "${USERPATH}/refresh-schedule-enabled" true
-    sudo -u "$USERNAME" dconf write "${USERPATH}/refresh-schedule-id" "'DAILY_MNT'"
-
-    gsettings set org.cinnamon.updates refresh-package-lists true
-    gsettings set org.cinnamon.updates refresh-frequency 1  # 1 = Daily
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
+APT::Periodic::Unattended-Upgrade "1";
+EOF
 
     systemctl enable --now apt-daily.timer &>/dev/null
     systemctl enable --now apt-daily-upgrade.timer &>/dev/null
@@ -208,10 +207,7 @@ remove_unauthorized_users() {
 fix_admin_group() {
   log_action "=== FIXING SUDO GROUP MEMBERSHIP ==="
 
-  # ADMIN - older ubuntu versions used admin group, included for compatibility
-
   SUDO_MEMBERS=$(getent group sudo | cut -d: -f4 | tr ',' ' ')
-  ADMIN_MEMBERS=$(getent group admin 2>/dev/null | cut -d: -f4 | tr ',' ' ')
 
   # Remove unauthorized users from sudo group
   for user in $SUDO_MEMBERS; do
@@ -220,16 +216,6 @@ fix_admin_group() {
       deluser "$user" sudo &>/dev/null
     fi
   done
-
-  # Check if admin group exists (then remove)
-  if getent group admin >/dev/null 2>&1; then
-    for user in $ADMIN_MEMBERS; do
-      if [[ ! "${ADMIN_USERS[@]}" =~ "${user}" ]]; then
-        log_action "Removing $user from admin group"
-        deluser "$user" admin &>/dev/null
-      fi
-    done
-  fi
 
   # Add authorized admin users to sudo group
   for user in "${ADMIN_USERS[@]}"; do
@@ -272,7 +258,7 @@ disable_guest() {
   fi
 
   # Alternative LightDM config location
-  if [ -d /etc/lightdm/lightdm.conf.d ]; then
+  if [ -d /etc/lightdm/lightdm.conf.d/ ]; then
     echo "[Seat:*]" > /etc/lightdm/lightdm.conf.d/50-no-guest.conf
     echo "allow-guest=false" >> /etc/lightdm/lightdm.conf.d/50-no-guest.conf
     log_action "Created /etc/lightdm/lightdm.conf.d/50-no-guest.conf"
@@ -284,7 +270,7 @@ disable_guest() {
     log_action "Updated dconf configuration database"
   fi
 
-  # GDM3 Display Manager (if used in some Mint configurations)
+  # GDM3 Display Manager (if used)
   for gdm_conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
     if [ -f "$gdm_conf" ]; then
       backup_file "$gdm_conf"
@@ -376,17 +362,20 @@ disallow_empty_passwords() {
 
 configure_pam() {
   log_action "=== CONFIGURING PAM: PWD COMPLEXITY, HISTORY, & ACCOUNT LOCKOUT ==="
-  
+
   apt install -y libpam-pwquality libpam-modules libpam-modules-bin &>/dev/null
-  
+
   backup_file /etc/pam.d/common-password
+
   sed -i '/pam_pwquality.so/d' /etc/pam.d/common-password &>/dev/null
   sed -i '/pam_unix.so/i password requisite pam_pwquality.so retry=3 minlen=12 maxrepeat=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 difok=3 reject_username enforce_for_root' /etc/pam.d/common-password &>/dev/null
   log_action "Configured password complexity requirements"
-  
+
   sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
   sed -i '/pam_unix.so/a password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
   log_action "Configured password history (remember=5)"
+
+  backup_file /etc/pam.d/common-auth
 }
 
 set_password_aging() {
@@ -409,10 +398,10 @@ set_password_aging() {
   fi
 
   # pwd expiration warning
-  if grep -q "^PASS_WARN_AGE" /etc/login.defs; then
-    sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE   7/' /etc/login.defs &>/dev/null
+  if grep -q "^PASS_WARN_DAYS" /etc/login.defs; then
+    sed -i 's/^PASS_WARN_DAYS.*/PASS_WARN_DAYS   7/' /etc/login.defs &>/dev/null
   else
-    echo "PASS_WARN_AGE   7" >>/etc/login.defs
+    echo "PASS_WARN_DAYS   7" >>/etc/login.defs
   fi
 
   log_action "Set password aging: max=14 days, min=5 days, warn=7 days"
@@ -441,6 +430,11 @@ secure_file_permissions() {
   [ -f /etc/passwd ] && chmod 644 /etc/passwd && chown root:root /etc/passwd &>/dev/null
   [ -f /etc/shadow ] && chmod 640 /etc/shadow && chown root:shadow /etc/shadow &>/dev/null
   [ -f /etc/group ] && chmod 644 /etc/group && chown root:root /etc/group &>/dev/null
+  [ -f /etc/sudoers ] && chmod 644 /etc/sudoers && chown root:root /etc/sudoers &>/dev/null
+  [ -f /etc/sudoers.d ] && chmod 644 /etc/sudoers.d && chown root:root /etc/sudoers.d &>/dev/null
+  [ -f /etc/fstab ] && chmod 644 /etc/fstab && chown root:root /etc/fstab &>/dev/null
+  [ -f /etc/hosts ] && chmod 644 /etc/hosts && chown root:root /etc/hosts &>/dev/null
+  [ -f /etc/ssh/sshd_config ] && chmod 644 /etc/ssh/sshd_config && chown root:root /etc/ssh/sshd_config &>/dev/null
   [ -f /etc/gshadow ] && chmod 640 /etc/gshadow && chown root:shadow /etc/gshadow &>/dev/null
   [ -f /etc/security/opasswd ] && chmod 600 /etc/security/opasswd && chown root:root /etc/security/opasswd &>/dev/null
 
@@ -482,9 +476,9 @@ secure_file_permissions() {
   [ -d /etc/ssl/private ] && chmod 710 /etc/ssl/private && chown root:ssl-cert /etc/ssl/private
   log_action "Secured SSL private key directory"
 
-  # FTP Root directory (vsftp)
+  # FTP Root directory (vsftpd)
   for ftp_root in /srv/ftp /var/ftp; do 
-    if [ -d "$ftp_root"]; then
+    if [ -d "$ftp_root" ]; then
       chmod 755 "$ftp_root"
       chown root:ftp "$ftp_root"
       log_action "Secured FTP root directory: $ftp_root"
@@ -560,6 +554,63 @@ find_world_writable_files() {
     log_action "    Perms: $(stat -c '%a' "$file" 2>/dev/null)"
   done < <(find / "${exclude_paths[@]}" -type f -perm -0002 -print 2>/dev/null)
   log_action "  To fix: chmod o-w /path/to/file"
+}
+
+fix_ssh_key_permissions() {
+  log_action "=== FIXING SSH KEY PERMISSIONS ==="
+
+  if [ -d /etc/ssh ]; then
+    find /etc/ssh -maxdepth 1 -type f -name "ssh_host_*_key" 2>/dev/null | while read key; do
+      chown root:root "$key" 2>/dev/null
+      chmod 600 "$key" 2>/dev/null
+      log_action "Fixed host private key perms: $key"
+    done
+
+    find /etc/ssh -maxdepth 1 -type f -name "ssh_host_*_key.pub" 2>/dev/null | while read key; do
+      chown root:root "$key" 2>/dev/null
+      chmod 644 "$key" 2>/dev/null
+      log_action "Fixed host public key perms: $key"
+    done
+  fi
+
+  awk -F: '$3>=1000 && $1!="nobody"{print $1":"$6}' /etc/passwd | while IFS=":" read -r user home; do
+    [ -d "$home" ] || continue
+
+    if [ -d "$home/.ssh" ]; then
+      chown -R "$user":"$user" "$home/.ssh" 2>/dev/null
+      chmod 700 "$home/.ssh" 2>/dev/null
+
+      find "$home/.ssh" -type f \( -name "id_*" -o -name "*_key" \) ! -name "*.pub" 2>/dev/null | while read key; do
+        chmod 600 "$key" 2>/dev/null
+        log_action "Fixed private key perms for $user: $key"
+      done
+
+      find "$home/.ssh" -type f -name "*.pub" 2>/dev/null | while read key; do
+        chmod 644 "$key" 2>/dev/null
+        log_action "Fixed public key perms for $user: $key"
+      done
+
+      if [ -f "$home/.ssh/authorized_keys" ]; then
+        chmod 600 "$home/.ssh/authorized_keys" 2>/dev/null
+        log_action "Secured authorized_keys for $user"
+      fi
+    fi
+  done
+
+  log_action "SSH key permission hardening complete"
+}
+
+check_home_permissions() {
+  log_action "=== FIXING HOME DIRECTORY PERMISSIONS ==="
+
+  awk -F: '$3>=1000 && $1!="nobody"{print $1":"$6}' /etc/passwd | \
+  while IFS=":" read -r user home; do
+    [ -d "$home" ] || continue
+
+    chmod 750 "$home" 2>/dev/null
+    chown "$user":"$user" "$home" 2>/dev/null
+    log_action "Fixed home dir perms for $user: $home"
+  done
 }
 
 check_suid_sgid() {
@@ -743,7 +794,6 @@ EOF
   log_action "Removed any malicious redirects or blocking entries"
 }
 
-# REQUIRES OpenSSH Server Service to be installed (should be by default)
 harden_ssh() {
   log_action "=== HARDENING SSH CONFIGURATION ==="
 
@@ -886,7 +936,7 @@ configure_firewall() {
   ufw default deny routed
   log_action "Set default policies"
 
-  ufw --force enable
+  ufw --force enable 
   log_action "UFW enabled"
 
   log_action "Firewall configuration complete"
@@ -1021,8 +1071,6 @@ remove_unauthorized_software() {
   log_action "Processed $package_count packages, removed $removed_count"
 }
 
-# Implement another function for auditing installed packages?
-
 remove_prohibited_media() {
   log_action "=== SCANNING FOR PROHIBITED MEDIA FILES ==="
 
@@ -1088,43 +1136,58 @@ remove_prohibited_media() {
 # Service Hardening
 #===============================================
 
-harden_vsftp() {
-  log_action "=== HARDENING VSFTP ==="
-  
-  if [! -f /etc/vsftp.conf]; then
-    log_action "vsftp not installed, skipping"
-    return
+harden_vsftpd() {
+  log_action "=== HARDENING VSFTPD ==="
+
+  # Correct config path
+  local conf="/etc/vsftpd.conf"
+
+  # Ensure vsftpd is installed
+  if ! dpkg -l | grep -q "^ii  vsftpd"; then
+    log_action "vsftpd not installed, installing..."
+    apt install -y vsftpd &>/dev/null
   fi
-  
-  backup_file /etc/vsftp.conf
+
+  # Now check for proper config file
+  if [ ! -f "$conf" ]; then
+    log_action "vsftpd installed but $conf missing, creating new config"
+    touch "$conf"
+  fi
+
+  backup_file "$conf"
 
   set_vsftpd_option() {
     local option="$1"
     local value="$2"
-    if grep -q "^#*${option}=" /etc/vsftp.conf; then
-      sed -i "s/v#*${option}=.*/${option}=${value}/" /etc/vsftp.conf
+    if grep -q "^${option}=" "$conf"; then
+      sed -i "s/^${option}=.*/${option}=${value}/" "$conf"
     else
-      echo ${option}=${value} >> /etc/vsftp.conf
+      echo "${option}=${value}" >> "$conf"
     fi
     log_action "Set ${option}=${value}"
   }
 
-  set_vsftpd_option "ssl_enable" "yes"
+  # SSL settings
+  set_vsftpd_option "ssl_enable" "YES"
   set_vsftpd_option "force_local_logins_ssl" "YES"
   set_vsftpd_option "force_local_data_ssl" "YES"
   set_vsftpd_option "ssl_tlsv1" "YES"
   set_vsftpd_option "ssl_sslv2" "NO"
   set_vsftpd_option "ssl_sslv3" "NO"
 
+  # Access control
   set_vsftpd_option "anonymous_enable" "NO"
   set_vsftpd_option "local_enable" "YES"
   set_vsftpd_option "write_enable" "YES"
   set_vsftpd_option "chroot_local_user" "YES"
-  set_vsftpd_option "allow_writable_chroot" "YES"
 
+  # Prevent writable chroot issues
+  set_vsftpd_option "allow_writeable_chroot" "YES"
+
+  # Restart to apply changes
+  systemctl restart vsftpd &>/dev/null
   log_action "vsftpd hardening complete"
 }
-
 
 harden_apache() {
   log_action "=== HARDENING APACHE ==="
@@ -1151,7 +1214,6 @@ harden_apache() {
 
   log_action "Apache hardening complete."
 }
-
 
 #===============================================
 # Cronjobs
@@ -1211,8 +1273,151 @@ secure_cron_system() {
 }
 
 #===============================================
-# Antivirus
+# Supporting Software
 #===============================================
+
+install_and_run_debsums() {
+  log_action "=== INSTALLING AND RUNNING DEBSUMS (PACKAGE INTEGRITY CHECK) ==="
+
+  # Install debsums
+  if ! dpkg -s debsums &>/dev/null; then
+    log_action "Installing debsums..."
+    apt update -y -qq &>/dev/null
+    apt install -y -qq debsums &>/dev/null
+    log_action "debsums installed"
+  else
+    log_action "debsums already installed"
+  fi
+
+  # Log file
+  local LOG="/var/log/debsums.log"
+
+  log_action "Running debsums to verify package file integrity"
+  log_action "Log file: $LOG"
+
+  # Run integrity scan
+  debsums -s &>"$LOG" || true
+
+  # Count mismatches
+  local BAD_COUNT
+  BAD_COUNT=$(wc -l <"$LOG" 2>/dev/null || echo 0)
+
+  if [ "$BAD_COUNT" -gt 0 ]; then
+    log_action "debsums found $BAD_COUNT modified or missing package files"
+    log_action "Review /var/log/debsums.log for details"
+  else
+    log_action "debsums found no package integrity issues"
+  fi
+
+  log_action "debsums scan complete"
+}
+
+install_and_run_debsecan() {
+  log_action "=== INSTALLING AND RUNNING DEBSECAN (VULNERABILITY SCANNER) ==="
+
+  # Install debsecan
+  if ! dpkg -s debsecan &>/dev/null; then
+    log_action "Installing debsecan..."
+    apt update -y -qq &>/dev/null
+    apt install -y -qq debsecan &>/dev/null
+    log_action "debsecan installed"
+  else
+    log_action "debsecan already installed"
+  fi
+
+  # Determine Ubuntu/Mint codename
+  local CODENAME
+  CODENAME=$(lsb_release -sc 2>/dev/null || echo "unknown")
+
+  # Log directory
+  local LOG="/var/log/debsecan.log"
+
+  log_action "Running debsecan vulnerability report for codename: $CODENAME"
+  log_action "Log file: $LOG"
+
+  # Run the scan and log results
+  debsecan --suite "$CODENAME" --format detailed &>"$LOG" || true
+
+  # Summaries for scoring
+  local CVE_COUNT
+  CVE_COUNT=$(grep -c "^CVE-" "$LOG" 2>/dev/null || echo 0)
+
+  if [ "$CVE_COUNT" -gt 0 ]; then
+    log_action "debsecan found $CVE_COUNT potential vulnerabilities"
+  else
+    log_action "debsecan found no listed CVEs for this system"
+  fi
+
+  log_action "debsecan scan complete"
+}
+
+install_and_config_aide() {
+  log_action "=== INSTALLING AND CONFIGURING AIDE ==="
+
+  # Install AIDE
+  if ! dpkg -s aide &>/dev/null; then
+    log_action "Installing aide and aide-common..."
+    apt update -y -qq &>/dev/null
+    apt install -y -qq aide aide-common &>/dev/null
+    log_action "AIDE installed"
+  else
+    log_action "AIDE already installed, skipping install"
+  fi
+
+  # Backup config if it exists
+  if [ -f /etc/aide/aide.conf ]; then
+    backup_file /etc/aide/aide.conf
+    log_action "Backed up /etc/aide/aide.conf"
+  fi
+
+  # Make sure log directory exists
+  if [ ! -d /var/log/aide ]; then
+    mkdir -p /var/log/aide
+    chmod 700 /var/log/aide
+    chown root:root /var/log/aide
+    log_action "Created /var/log/aide directory"
+  fi
+
+  # Initialize AIDE database
+  log_action "Initializing AIDE database (aideinit)..."
+  if command -v aideinit &>/dev/null; then
+    aideinit &>>/var/log/aide/aide-init.log || true
+  else
+    # Fallback for older setups
+    aide --init &>>/var/log/aide/aide-init.log || true
+  fi
+
+  # Move new database into place if present
+  if [ -f /var/lib/aide/aide.db.new ] || [ -f /var/lib/aide/aide.db.new.gz ]; then
+    log_action "Placing new AIDE database"
+    if [ -f /var/lib/aide/aide.db.new.gz ]; then
+      mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
+    else
+      mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+    fi
+    chown root:root /var/lib/aide/aide.db* 2>/dev/null
+    chmod 600 /var/lib/aide/aide.db* 2>/dev/null
+    log_action "AIDE database initialized and secured"
+
+    # Run an immediate AIDE check against the new baseline
+    log_action "Running initial AIDE check..."
+    if command -v aide &>/dev/null; then
+      aide --check &>>/var/log/aide/aide-check.log || true
+
+      if grep -q "AIDE found differences" /var/log/aide/aide-check.log 2>/dev/null; then
+        log_action "AIDE check finished, differences found. See /var/log/aide/aide-check.log"
+      else
+        log_action "AIDE check finished, no differences reported"
+      fi
+    else
+      log_action "WARNING: 'aide' binary not found, cannot run aide --check"
+    fi
+  else
+    log_action "WARNING: AIDE did not create a new database, check /var/log/aide/aide-init.log"
+  fi
+
+  log_action "AIDE setup complete"
+}
 
 run_rootkit_scans() {
   log_action "=== RUNNING ROOTKIT SCANS ==="
@@ -1304,10 +1509,11 @@ run_rootkit_scans() {
 }
 
 #==============================================
-# System Auditing
+# Auditd
 #==============================================
+
 harden_auditd() {
-  log_action "=== HARDENING AUDITD ==="
+  log_action "=== HARDENING AUDITD (SYSTEM AUDITING) ==="
 
   # Install auditd
   if ! command -v auditctl &>/dev/null; then
@@ -1430,6 +1636,7 @@ enable_app_armor() {
 #===============================================
 # Lynis
 #===============================================
+
 audit_with_lynis() {
   log_action "=== RUNNING LYNIS SECURITY AUDIT ==="
 
@@ -1455,7 +1662,7 @@ main() {
   preflight_check
 
   log_action "======================================"
-  log_action "STARTING LINUX MINT HARDENING SCRIPT"
+  log_action "STARTING MINT HARDENING SCRIPT"
   log_action "======================================"
   log_action "Timestamp: $(date)"
   log_action ""
@@ -1483,8 +1690,10 @@ main() {
 
   log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
   secure_file_permissions
+  check_home_permissions
   fix_sudoers_nopasswd
   find_world_writable_files
+  fix_ssh_key_permissions
   check_suid_sgid
   find_orphaned_files
   log_action ""
@@ -1510,7 +1719,7 @@ main() {
   log_action ""
 
   log_action "[ PHASE 9: SERVICE HARDENING ]"
-  harden_vsftp
+  harden_vsftpd
   harden_apache
   log_action ""
 
@@ -1524,10 +1733,12 @@ main() {
 
   log_action "[ PHASE 12: SYSTEM AUDITING ]"
   harden_auditd
+  install_and_config_aide
+  install_and_run_debsecan
+  install_and_run_debsums
   enable_app_armor
   log_action ""
 
-  # 12. COMPREHENSIVE SECURITY AUDIT
   log_action "[ PHASE 13: LYNIS AUDIT ]"
   audit_with_lynis
   log_action ""

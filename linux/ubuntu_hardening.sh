@@ -600,13 +600,17 @@ fix_ssh_key_permissions() {
   log_action "SSH key permission hardening complete"
 }
 
-check_home_permissions(){
-  log_actions "=== Fixing home directory permissions ==="
+check_home_permissions() {
+  log_action "=== FIXING HOME DIRECTORY PERMISSIONS ==="
 
-  chmod 750 "$home" 2>/dev/null
-  chown "$user":"$user" "$home" 2>/dev/null
-  log_action " Fixed home directory permissions"
+  awk -F: '$3>=1000 && $1!="nobody"{print $1":"$6}' /etc/passwd | \
+  while IFS=":" read -r user home; do
+    [ -d "$home" ] || continue
 
+    chmod 750 "$home" 2>/dev/null
+    chown "$user":""$user"" "$home" 2>/dev/null
+    log_action "Fixed home dir perms for $user: $home"
+  done
 }
 
 check_suid_sgid() {
@@ -1273,8 +1277,153 @@ secure_cron_system() {
 }
 
 #===============================================
-# Antivirus
+# Supporting Software
 #===============================================
+
+install_and_run_debsums() {
+  log_action "=== INSTALLING AND RUNNING DEBSUMS (PACKAGE INTEGRITY CHECK) ==="
+
+  # Install debsums
+  if ! dpkg -s debsums &>/dev/null; then
+    log_action "Installing debsums..."
+    apt update -y -qq &>/dev/null
+    apt install -y -qq debsums &>/dev/null
+    log_action "debsums installed"
+  else
+    log_action "debsums already installed"
+  fi
+
+  # Log file
+  local LOG="/var/log/debsums.log"
+
+  log_action "Running debsums to verify package file integrity"
+  log_action "Log file: $LOG"
+
+  # Run integrity scan
+  debsums -s &>"$LOG" || true
+
+  # Count mismatches
+  local BAD_COUNT
+  BAD_COUNT=$(wc -l <"$LOG" 2>/dev/null || echo 0)
+
+  if [ "$BAD_COUNT" -gt 0 ]; then
+    log_action "debsums found $BAD_COUNT modified or missing package files"
+    log_action "Review /var/log/debsums.log for details"
+  else
+    log_action "debsums found no package integrity issues"
+  fi
+
+  log_action "debsums scan complete"
+}
+
+install_and_run_debsecan() {
+  log_action "=== INSTALLING AND RUNNING DEBSECAN (VULNERABILITY SCANNER) ==="
+
+  # Install debsecan
+  if ! dpkg -s debsecan &>/dev/null; then
+    log_action "Installing debsecan..."
+    apt update -y -qq &>/dev/null
+    apt install -y -qq debsecan &>/dev/null
+    log_action "debsecan installed"
+  else
+    log_action "debsecan already installed"
+  fi
+
+  # Determine Ubuntu codename
+  local CODENAME
+  CODENAME=$(lsb_release -sc 2>/dev/null || echo "unknown")
+
+  # Log directory
+  local LOG="/var/log/debsecan.log"
+
+  log_action "Running debsecan vulnerability report for codename: $CODENAME"
+  log_action "Log file: $LOG"
+
+  # Run the scan and log results
+  debsecan --suite "$CODENAME" --format detailed &>"$LOG" || true
+
+  # Summaries for scoring
+  local CVE_COUNT
+  CVE_COUNT=$(grep -c "^CVE-" "$LOG" 2>/dev/null || echo 0)
+
+  if [ "$CVE_COUNT" -gt 0 ]; then
+    log_action "debsecan found $CVE_COUNT potential vulnerabilities"
+  else
+    log_action "debsecan found no listed CVEs for this system"
+  fi
+
+  log_action "debsecan scan complete"
+}
+
+
+install_and_config_aide() {
+  log_action "=== INSTALLING AND CONFIGURING AIDE ==="
+
+  # Install AIDE
+  if ! dpkg -s aide &>/dev/null; then
+    log_action "Installing aide and aide-common..."
+    apt update -y -qq &>/dev/null
+    apt install -y -qq aide aide-common &>/dev/null
+    log_action "AIDE installed"
+  else
+    log_action "AIDE already installed, skipping install"
+  fi
+
+  # Backup config if it exists
+  if [ -f /etc/aide/aide.conf ]; then
+    backup_file /etc/aide/aide.conf
+    log_action "Backed up /etc/aide/aide.conf"
+  fi
+
+  # Make sure log directory exists
+  if [ ! -d /var/log/aide ]; then
+    mkdir -p /var/log/aide
+    chmod 700 /var/log/aide
+    chown root:root /var/log/aide
+    log_action "Created /var/log/aide directory"
+  fi
+
+  # Initialize AIDE database
+  log_action "Initializing AIDE database (aideinit)..."
+  if command -v aideinit &>/dev/null; then
+    aideinit &>>/var/log/aide/aide-init.log || true
+  else
+    # Fallback for older setups
+    aide --init &>>/var/log/aide/aide-init.log || true
+  fi
+
+  # Move new database into place if present
+  if [ -f /var/lib/aide/aide.db.new ] || [ -f /var/lib/aide/aide.db.new.gz ]; then
+    log_action "Placing new AIDE database"
+    if [ -f /var/lib/aide/aide.db.new.gz ]; then
+      mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz
+    else
+      mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+    fi
+    chown root:root /var/lib/aide/aide.db* 2>/dev/null
+    chmod 600 /var/lib/aide/aide.db* 2>/dev/null
+    log_action "AIDE database initialized and secured"
+
+    # Run an immediate AIDE check against the new baseline
+    log_action "Running initial AIDE check..."
+    if command -v aide &>/dev/null; then
+      aide --check &>>/var/log/aide/aide-check.log || true
+
+      if grep -q "AIDE found differences" /var/log/aide/aide-check.log 2>/dev/null; then
+        log_action "AIDE check finished, differences found. See /var/log/aide/aide-check.log"
+      else
+        log_action "AIDE check finished, no differences reported"
+      fi
+    else
+      log_action "WARNING: 'aide' binary not found, cannot run aide --check"
+    fi
+  else
+    log_action "WARNING: AIDE did not create a new database, check /var/log/aide/aide-init.log"
+  fi
+
+  log_action "AIDE setup complete"
+}
+
 
 run_rootkit_scans() {
   log_action "=== RUNNING ROOTKIT SCANS ==="
@@ -1550,6 +1699,7 @@ main() {
   check_home_permissions
   fix_sudoers_nopasswd
   find_world_writable_files
+  fix_ssh_key_permissions
   check_suid_sgid
   find_orphaned_files
   log_action ""
@@ -1575,7 +1725,8 @@ main() {
   log_action ""
 
   log_action "[ PHASE 9: SERVICE HARDENING ]"
-  harden_vsftp
+  harden_vsftpd
+  
   harden_apache
   log_action ""
 
@@ -1589,6 +1740,9 @@ main() {
 
   log_action "[ PHASE 12: SYSTEM AUDITING ]"
   harden_auditd
+  install_and_config_aide
+  install_and_run_debsecan
+  install_and_run_debsums
   enable_app_armor
   log_action ""
 
