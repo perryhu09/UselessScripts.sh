@@ -99,6 +99,16 @@ enable_security_updates() {
 enable_auto_update_refresh() {
     log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
 
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/10periodic >/dev/null
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+EOF
+
+    cat <<EOF | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+
     systemctl enable --now apt-daily.timer &>/dev/null
     systemctl enable --now apt-daily-upgrade.timer &>/dev/null
 
@@ -319,6 +329,7 @@ lock_root_account() {
   log_action "=== LOCKING ROOT ACCOUNT ==="
   if id root &>/dev/null; then
     if passwd -l root &>/dev/null; then
+      usermod -s /usr/sbin/nologin root
       log_action "Root password locked successfully."
     else
       log_action "ERROR: Failed to lock root password."
@@ -1102,6 +1113,32 @@ harden_vsftp() {
   log_action "vsftpd hardening complete"
 }
 
+harden_apache() {
+  log_action "=== HARDENING APACHE ==="
+
+  if ! command -v apache2 >/dev/null 2>&1 && [ ! -d /etc/apache2 ]; then
+      log_action "Apache2 not found. Skipping Apache hardening."
+      return 0
+  fi
+
+  SECURITY_CONF="/etc/apache2/conf-available/security.conf"
+
+  if [ ! -f "$SECURITY_CONF" ]; then
+      log_action "apache2 security.conf not found, creating it."
+      touch "$SECURITY_CONF"
+  fi
+
+  sed -i 's/^ServerTokens .*/ServerTokens Prod/' "$SECURITY_CONF" || echo "ServerTokens Prod" >> "$SECURITY_CONF"
+  sed -i 's/^ServerSignature .*/ServerSignature Off/' "$SECURITY_CONF" || echo "ServerSignature Off" >> "$SECURITY_CONF"
+  sed -i 's/^TraceEnable .*/TraceEnable Off/' "$SECURITY_CONF" || echo "TraceEnable Off" >> "$SECURITY_CONF"
+
+  a2enconf security.conf >/dev/null 2>&1
+
+  systemctl restart apache2
+
+  log_action "Apache hardening complete."
+}
+
 #===============================================
 # Cronjobs
 #===============================================
@@ -1462,6 +1499,7 @@ main() {
 
   log_action "[ PHASE 9: SERVICE HARDENING ]"
   harden_vsftp
+  harden_apache
   log_action ""
 
   log_action "[ PHASE 10: CRON SECURITY ]"
