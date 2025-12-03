@@ -1077,39 +1077,31 @@ remove_prohibited_media() {
 
 harden_vsftp() {
   log_action "=== HARDENING VSFTP ==="
-  
-  if [! -f /etc/vsftp.conf]; then
-    log_action "vsftp not installed, skipping"
-    return
-  fi
-  
-  backup_file /etc/vsftp.conf
 
-  set_vsftpd_option() {
+  local config=""
+  if [ -f "/etc/vsfptd.conf" ]; then
+    config="/etc/vsftpd.conf"
+  elif [ -f "/etc/vsftpd/vsftpd.conf" ]; then
+    config="/etc/vsftpd/vsftpd.conf"
+  else
+    log_action "vsftpd not installed (no config found), skipping"
+    return 0
+  fi
+
+  log_action "Found vsftpd config: $config"
+  backup_file "$config"
+
+  set_option() {
     local option="$1"
     local value="$2"
-    if grep -q "^#*${option}=" /etc/vsftp.conf; then
-      sed -i "s/v#*${option}=.*/${option}=${value}/" /etc/vsftp.conf
+
+    if grep -q "^#*\s*${option}=" "$config"; then
+      sed -i "s/^#*\s*${option}=.*/${option}=${value}/" "$config"
     else
-      echo ${option}=${value} >> /etc/vsftp.conf
+      echo "${option}=${value}" >> "$config"
     fi
-    log_action "Set ${option}=${value}"
   }
-
-  set_vsftpd_option "ssl_enable" "yes"
-  set_vsftpd_option "force_local_logins_ssl" "YES"
-  set_vsftpd_option "force_local_data_ssl" "YES"
-  set_vsftpd_option "ssl_tlsv1" "YES"
-  set_vsftpd_option "ssl_sslv2" "NO"
-  set_vsftpd_option "ssl_sslv3" "NO"
-
-  set_vsftpd_option "anonymous_enable" "NO"
-  set_vsftpd_option "local_enable" "YES"
-  set_vsftpd_option "write_enable" "YES"
-  set_vsftpd_option "chroot_local_user" "YES"
-  set_vsftpd_option "allow_writable_chroot" "YES"
-
-  log_action "vsftpd hardening complete"
+  
 }
 
 #===============================================
