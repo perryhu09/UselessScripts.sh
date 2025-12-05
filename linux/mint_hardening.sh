@@ -40,6 +40,7 @@ backup_file() {
     log_action "Backed up $1"
   fi
 }
+
 #===============================================
 # Pre-Flight Checklist
 #===============================================
@@ -95,25 +96,86 @@ enable_security_updates() {
     log_action "Security update repos ensured"
 }
 
-enable_auto_update_refresh() {
-    log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
+configure_automatic_updates() {
+  log_action "=== CONFIGURING AUTOMATIC UPDATES ==="
 
-    USERNAME=$(ls /home | head -n 1)
-    USERPATH="/com/linuxmint/${USERNAME}" #is this right for all linux mint images?
+  DEBIAN_FRONTEND=noninteractive apt-get update -y -qq &>/dev/null
 
-    apt-get update -y
-    apt-get install -y dconf-cli
+  # Install unattended updates
+  if ! dpkg -l | grep -q unattended-upgrades; then
+    apt install -y unattended-upgrades apt-listchanges &>/dev/null
+    log_action "Installed unattended-upgrades"
+  fi
 
-    sudo -u "$USERNAME" dconf write "${USERPATH}/refresh-schedule-enabled" true
-    sudo -u "$USERNAME" dconf write "${USERPATH}/refresh-schedule-id" "'DAILY_MNT'"
+  # Enable automatic updates
+  echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections &>/dev/null
+  dpkg-reconfigure -f noninteractive unattended-upgrades &>/dev/null
+  log_action "Enabled unattended-upgrades"
 
-    gsettings set org.cinnamon.updates refresh-package-lists true
-    gsettings set org.cinnamon.updates refresh-frequency 1  # 1 = Daily
+  backup_file /etc/apt/apt.conf.d/20auto-upgrades
 
-    systemctl enable --now apt-daily.timer &>/dev/null
-    systemctl enable --now apt-daily-upgrade.timer &>/dev/null
+  cat >/etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+  log_action "Configured daily automatic updates"
 
-    log_action "Automatic update refresh enabled"
+  # clean up policy
+  local unattended_conf="/etc/apt/apt.conf.d/50unattended-upgrades"
+  touch "$unattended_conf"
+  grep -q "Remove-Unused-Kernel-Packages" "$unattended_conf" || echo 'Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";' >> "$unattended_conf"
+  grep -q "Remove-Unused-Dependencies" "$unattended_conf" || echo 'Unattended-Upgrade::Remove-Unused-Dependencies "true";' >> "$unattended_conf"
+  log_action "Configured automatic cleanup policy"
+  
+  systemctl enable apt-daily.timer &>/dev/null
+  systemctl start apt-daily.timer &>/dev/null
+  systemctl enable apt-daily-upgrade.timer &>/dev/null
+  systemctl start apt-daily-upgrade.timer &>/dev/null
+
+  if systemctl is-active --quiet apt-daily.timer && systemctl is-active --quiet apt-daily-upgrade.timer; then
+    log_action "APT update timers active"
+  else
+    log_action "WARNING: APT timers may not be active"
+  fi
+  
+  # clear package holds
+  local held=$(apt-mark showhold 2>/dev/null)
+  if [[ -n "$held" ]]; then
+    while IFS=read -r pkg; do
+      [[ -n "$pkg" ]] && apt-mark unhold "$pkg" &>/dev/null
+    done <<< "$held"
+    log_action "Cleared package holds"
+  fi
+
+  # create systemd timer to update flatpak apps daily
+  if command -v flatpak &>/dev/null; then
+    cat >/etc/systemd/system/cp-flatpak-update.service << 'EOF'
+[Unit]
+Description=CyberPatriot Flatpak Auto-Update
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update -y --noninteractive
+EOF
+
+    cat >/etc/systemd/system/cp-flatpak-update.timer << 'EOF'
+[Unit]
+Description=Daily Flatpak updates
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload &>/dev/null
+    systemctl enable --now cp-flatpak-update.timer &>/dev/null
+    log_action "Flatpak auto-update timer enabled"
+  fi
 }
 
 update_system() {
@@ -146,31 +208,13 @@ update_system() {
 
   apt autoclean -y -qq &>/dev/null
   log_action "Cleaned package cache"
-}
 
-configure_automatic_updates() {
-  log_action "=== CONFIGURING AUTOMATIC UPDATES ==="
-
-  # Install unattended updates
-  if ! dpkg -l | grep -q unattended-upgrades; then
-    apt install -y unattended-upgrades apt-listchanges &>/dev/null
-    log_action "Installed unattended-upgrades"
+  if [[ -f /var/run/reboot-required ]]; then
+    log_action "*** REBOOT REQUIRED to complete updates"
   fi
 
-  # Enable automatic updates
-  echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections &>/dev/null
-  dpkg-reconfigure -f noninteractive unattended-upgrades &>/dev/null
-  log_action "Enabled unattended-upgrades"
-
-  backup_file /etc/apt/apt.conf.d/20auto-upgrades
-
-  cat >/etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Download-Upgradeable-Packages "1";
-APT::Periodic::AutocleanInterval "7";
-APT::Periodic::Unattended-Upgrade "1";
-EOF
-  log_action "Configured daily automatic updates"
+  local remaining=$(apt-get -s upgrade 2>/dev/null | grep -c "^Inst" || echo "0")
+  log_action "Remaining upgradeable packages: $remaining"
 }
 
 #===============================================
@@ -2690,9 +2734,8 @@ main() {
   log_action ""
 
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
-  update_system
   configure_automatic_updates
-  enable_auto_update_refresh
+  update_system
   log_action ""
 
   log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
