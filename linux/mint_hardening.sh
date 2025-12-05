@@ -433,6 +433,75 @@ configure_pam() {
   log_action "Configured password history (remember=5)"
 }
 
+configure_account_lockout() {
+    log_action "=== CONFIGURING ACCOUNT LOCKOUT POLICY ==="
+
+    if ! find /lib* /usr/lib* -name "pam_faillock.so" 2>/dev/null | grep -q .; then
+        log_action "WARNING: pam_faillock.so not found, skipping lockout config"
+        return 1
+    fi
+
+    # Create pam-config profile: faillock_notify (runs BEFORE authentication)
+    cat >/usr/share/pam-configs/faillock_notify <<'EOF'
+Name: Notify on account lockout
+Default: no
+Priority: 1024
+Auth-Type: Primary
+Auth:
+    requisite                       pam_faillock.so preauth
+EOF
+    log_action "Created faillock_notify profile"
+
+    # Create pam-config profile: faillock (runs AFTER failed auth)
+    cat >/usr/share/pam-configs/faillock <<'EOF'
+Name: Lockout on failed logins
+Default: no
+Priority: 0
+Auth-Type: Primary
+Auth:
+    [default=die]                   pam_faillock.so authfail
+EOF
+    log_action "Created faillock profile"
+
+    # Create pam-config profile: faillock_reset (runs AFTER successful auth)
+    cat >/usr/share/pam-configs/faillock_reset <<'EOF'
+Name: Reset lockout on success
+Default: no
+Priority: 0
+Auth-Type: Additional
+Auth:
+    required                        pam_faillock.so authsucc
+EOF
+    log_action "Created faillock_reset profile"
+
+    if pam-auth-update --enable faillock faillock_reset faillock_notify --force 2>/dev/null; then
+        log_action "Enabled faillock profiles via pam-auth-update"
+    else
+        log_action "ERROR: pam-auth-update failed"
+        return 1
+    fi
+
+    backup_file /etc/security/faillock.conf
+    cat >/etc/security/faillock.conf <<'EOF'
+# Account Lockout Configuration
+
+# Lock account after 5 failed attempts
+deny = 5
+
+# Unlock after 15 minutes (900 seconds)
+unlock_time = 900
+
+# Count failures within 15 minute window
+fail_interval = 900
+
+# Also lock root account on failed attempts
+even_deny_root
+EOF
+    log_action "Configured /etc/security/faillock.conf"
+
+    log_action "Account lockout policy configured (lock after 5 failures, unlock after 15 min)"
+}
+
 set_password_aging() {
   log_action "=== CONFIGURE PASSWORD AGING POLICIES ==="
 
@@ -2748,8 +2817,9 @@ main() {
   log_action ""
 
   log_action "[ PHASE 3: PASSWORD POLICIES ]"
-  disallow_empty_passwords
+  configure_account_lockout
   configure_pam
+  disallow_empty_passwords
   set_password_aging
   log_action ""
 
