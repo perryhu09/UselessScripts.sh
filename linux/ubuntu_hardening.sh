@@ -1183,6 +1183,22 @@ harden_grub() {
   log_action "GRUB hardening complete"
 }
 
+remove_rbash() {
+  log_action "=== REMOVING RESTRICTED BASH ARTIFACTS ==="
+
+  local targets=("/usr/bin/rbash" "/usr/share/doc/bash/RBASH")
+  local removed=0
+
+  for target in "${targets[@]}"; do
+    if [[ -e "$target" ]]; then
+      rm -rf "$target" &>/dev/null && ((removed++))
+      log_action "Removed: $target"
+    fi
+  done
+
+  [[ $removed -eq 0 ]] && log_action "No restricted bash artifacts found"
+}
+
 #===============================================
 # Firewall
 #===============================================
@@ -2875,6 +2891,7 @@ main() {
   harden_ssh
   harden_kernel_sysctl
   harden_grub # need to refactor code this is getting kinda long
+  remove_rbash
   log_action ""
 
   log_action "[ PHASE 6: FIREWALL ]"
