@@ -299,6 +299,62 @@ check_uid_zero() {
   fi
 }
 
+check_group_sudo_privileges() {
+  log_action "=== CHECKING GROUP SUDO PRIVILEGES ==="
+
+  log_action "Checking for groups with sudo privileges..."
+
+  local issues_found=0
+
+  if getent group sudo >/dev/null 2>&1; then
+    local sudo_members
+    sudo_members=$(getent group sudo | cut -d: -f4)
+    if [[ -n "$sudo_members" ]]; then
+      log_action "Sudo group members: $sudo_members"
+      log_action "This is expected - individual users should be in sudo group, not other groups"
+    fi
+  fi
+
+  if [[ -f /etc/sudoers ]]; then
+    while IFS= read -r line; do
+      if [[ -n "$line" ]]; then
+        local groupname
+        groupname=$(echo "$line" | sed 's/^%\([^ ]*\).*/\1/')
+        
+        if [[ "$groupname" != "sudo" && "$groupname" != "admin" ]]; then
+          log_action "WARNING: Group $groupname has sudo privileges in /etc/sudoers"
+          log_action "Disabling sudo privileges for group: $groupname"
+          sed -i "s/^\(%$groupname.*\)$/# DISABLED BY SECURITY POLICY: \1/" /etc/sudoers
+          issues_found=$((issues_found + 1))
+        fi
+      fi
+    done < <(grep -E "^%[^#]" /etc/sudoers 2>/dev/null | grep -v "^%sudo" | grep -v "^%admin")
+  fi
+
+  if [[ -d /etc/sudoers.d ]]; then
+    while IFS= read -r file; do
+      while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+          local groupname
+          groupname=$(echo "$line" | sed 's/^%\([^ ]*\).*/\1/')
+          if [[ "$groupname" != "sudo" && "$groupname" != "admin" ]]; then
+            log_action "WARNING: Group $groupname has sudo privileges in $file"
+            log_action "Disabling sudo privileges for group: $groupname in $file"
+            sed -i "s/^\(%$groupname.*\)$/# DISABLED BY SECURITY POLICY: \1/" "$file"
+            issues_found=$((issues_found + 1))
+          fi
+        fi
+      done < <(grep -E "^%[^#]" "$file" 2>/dev/null | grep -v "^%sudo" | grep -v "^%admin")
+    done < <(find /etc/sudoers.d -type f)
+  fi
+
+  if [[ $issues_found -eq 0 ]]; then
+    log_action "No unauthorized groups have sudo privileges"
+  else
+    log_action "Removed sudo privileges from $issues_found unauthorized group(s)"
+  fi
+}
+
 disable_guest() {
   log_action "=== DISABLING GUEST ACCOUNT ==="
 
@@ -3410,6 +3466,7 @@ main() {
   remove_unauthorized_users
   fix_admin_group
   check_uid_zero
+  check_group_sudo_privileges
   disable_guest
   set_all_user_passwords
   lock_root_account
