@@ -1247,6 +1247,151 @@ remove_rbash() {
   [[ $removed -eq 0 ]] && log_action "No restricted bash artifacts found"
 }
 
+configure_screen_security() {
+  log_action "=== CONFIGURING SCREEN TIMEOUT AND LOCKING ==="
+
+  local dconf_dir="/etc/dconf/db/local.d"
+  local lock_dir="/etc/dconf/db/local.d/locks"
+
+  mkdir -p "$dconf_dir" "$lock_dir"
+
+  cat > "$dconf_dir/00-cyberpatriot-screen" <<'EOF'
+[org/gnome/desktop/session]
+idle-delay=uint32 300
+
+[org/gnome/desktop/screensaver]
+idle-activation-enabled=true
+lock-delay=uint32 0
+lock-enabled=true
+
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='suspend'
+sleep-inactive-ac-timeout=1800
+sleep-inactive-battery-type='suspend'
+sleep-inactive-battery-timeout=1200
+power-button-action='interactive'
+
+[org/cinnamon/desktop/session]
+idle-delay=uint32 300
+
+[org/cinnamon/desktop/screensaver]
+idle-activation-enabled=true
+lock-delay=uint32 0
+lock-enabled=true
+
+[org/cinnamon/settings-daemon/plugins/power]
+sleep-inactive-ac-type='suspend'
+sleep-inactive-ac-timeout=1800
+sleep-inactive-battery-type='suspend'
+sleep-inactive-battery-timeout=1200
+power-button-action='interactive'
+EOF
+
+  cat > "$lock_dir/00-cyberpatriot-screen" <<'EOF'
+/org/gnome/desktop/session/idle-delay
+/org/gnome/desktop/screensaver/idle-activation-enabled
+/org/gnome/desktop/screensaver/lock-delay
+/org/gnome/desktop/screensaver/lock-enabled
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-type
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-timeout
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-type
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-timeout
+/org/gnome/settings-daemon/plugins/power/power-button-action
+/org/cinnamon/desktop/session/idle-delay
+/org/cinnamon/desktop/screensaver/idle-activation-enabled
+/org/cinnamon/desktop/screensaver/lock-delay
+/org/cinnamon/desktop/screensaver/lock-enabled
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-ac-type
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-ac-timeout
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-battery-type
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-battery-timeout
+/org/cinnamon/settings-daemon/plugins/power/power-button-action
+EOF
+
+  command -v dconf &>/dev/null && dconf update &>/dev/null && log_action "Applied screen timeout/locking policies"
+}
+
+disable_xserver_tcp() {
+  log_action "=== DISABLING X SERVER TCP CONNECTIONS ==="
+
+  local configs_created=0
+
+  mkdir -p /etc/X11/xorg.conf.d
+  cat > /etc/X11/xorg.conf.d/10-nolisten.conf <<'EOF'
+Section "ServerFlags"
+    Option "DisallowTCP" "true"
+EndSection
+EOF
+  ((configs_created++))
+  log_action "Created /etc/X11/xorg.conf.d/10-nolisten.conf"
+
+  if [[ -f /etc/gdm3/custom.conf ]]; then
+    backup_file /etc/gdm3/custom.conf
+    if grep -q "^DisallowTCP=" /etc/gdm3/custom.conf; then
+      sed -i 's/^DisallowTCP=.*/DisallowTCP=true/' /etc/gdm3/custom.conf
+    elif grep -q "^\[security\]" /etc/gdm3/custom.conf; then
+      sed -i '/^\[security\]/a DisallowTCP=true' /etc/gdm3/custom.conf
+    else
+      echo -e "\n[security]\nDisallowTCP=true" >> /etc/gdm3/custom.conf
+    fi
+    ((configs_created++))
+    log_action "Configured GDM3 to disable TCP"
+  fi
+
+  if [[ -f /etc/lightdm/lightdm.conf ]] || [[ -d /etc/lightdm/lightdm.conf.d ]]; then
+    mkdir -p /etc/lightdm/lightdm.conf.d
+    cat > /etc/lightdm/lightdm.conf.d/50-nolisten.conf <<'EOF'
+[Seat:*]
+xserver-allow-tcp=false
+EOF
+    ((configs_created++))
+    log_action "Configured LightDM to disable TCP"
+  fi
+
+  log_action "X Server TCP disabled in $configs_created config(s)"
+}
+
+validate_gdm3_config() {
+  log_action "=== VALIDATING GDM3 USER CONFIGURATION ==="
+
+  local gdm_custom="/etc/gdm3/custom.conf"
+  local gdm_dropin="/etc/systemd/system/gdm.service.d"
+  local sanitized=false
+
+  if [[ -f "$gdm_custom" ]]; then
+    backup_file "$gdm_custom"
+    if grep -q "^User=" "$gdm_custom"; then
+      sed -i '/^User=/d' "$gdm_custom"
+      sanitized=true
+    fi
+    if grep -q "^Group=" "$gdm_custom"; then
+      sed -i '/^Group=/d' "$gdm_custom"
+      sanitized=true
+    fi
+  fi
+
+  if [[ -d "$gdm_dropin" ]]; then
+    for file in "$gdm_dropin"/*.conf; do
+      [[ -f "$file" ]] || continue
+      backup_file "$file"
+      if grep -q "^User=" "$file"; then
+        sed -i '/^User=/d' "$file"
+        sanitized=true
+      fi
+      if grep -q "^Group=" "$file"; then
+        sed -i '/^Group=/d' "$file"
+        sanitized=true
+      fi
+    done
+  fi
+
+  if [[ "$sanitized" == true ]]; then
+    command -v systemctl &>/dev/null && systemctl daemon-reload &>/dev/null
+    log_action "Removed custom user/group overrides for GDM3"
+  else
+    log_action "No problematic GDM3 configuration found"
+  fi
+}
 #===============================================
 # Firewall
 #===============================================
@@ -2937,9 +3082,11 @@ main() {
   fix_hosts_file
   harden_ssh
   harden_kernel_sysctl
-
   harden_grub
   remove_rbash
+  configure_screen_security
+  disable_xserver_tcp
+  validate_gdm3_config #helper
   log_action ""
 
   log_action "[ PHASE 6: FIREWALL ]"
