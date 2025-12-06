@@ -588,6 +588,12 @@ fix_sudoers_nopasswd() {
   else
     log_action "Fixed $found_issues sudoers file(s) with NOPASSWD entries"
   fi
+
+  if [[ -f /etc/sudoers ]]; then
+    grep -q "Defaults.*use_pty" /etc/sudoers || echo "Defaults use_pty" >> /etc/sudoers
+    grep -q 'Defaults.*logfile=' /etc/sudoers || echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
+    log_action "Added sudo PTY requirement and logging"
+  fi
 }
 
 find_world_writable_files() {
