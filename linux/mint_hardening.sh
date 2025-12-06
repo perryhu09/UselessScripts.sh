@@ -217,6 +217,37 @@ update_system() {
   log_action "Remaining upgradeable packages: $remaining"
 }
 
+install_security_dependencies() {
+  log_action "=== INSTALLING REQUIRED SECURITY TOOLS ==="
+
+  local packages=(curl jq debsums) # TODO: ADD MORE
+  local missing=()
+
+  for pkg in "${packages[@]}"; do
+    if ! command -v "$pkg" &>/dev/null; then
+      missing+=("$pkg")
+    fi
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    log_action "All required security tools already installed"
+    return 0
+  fi
+
+  log_action "Installing missing packages: ${missing[*]}"
+  
+  if ! apt-get update -qq 2>/dev/null; then
+    log_action "WARNING: apt-get update failed, attempting installation anyway"
+  fi
+
+  for pkg in "${missing[@]}"; do
+    if apt-get install -y "$pkg" >/dev/null 2>&1; then
+      log_action "✓ Installed $pkg"
+    else
+      log_action "⚠ WARNING: Failed to install $pkg"
+    fi
+  done
+}
 #===============================================
 # Users && Groups
 #===============================================
@@ -3460,6 +3491,7 @@ main() {
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
   configure_automatic_updates
   update_system
+  install_security_dependencies
   log_action ""
 
   log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
