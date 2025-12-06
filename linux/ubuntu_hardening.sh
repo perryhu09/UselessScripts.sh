@@ -1098,6 +1098,91 @@ EOF
   log_action "Kernel hardening complete"
 }
 
+harden_grub() {
+  log_action "=== HARDENING GRUB BOOTLOADER ==="
+
+  # perms
+  log_action "Securing GRUB configuration files..."
+  local grub_files=(
+    "/boot/grub/grub.cfg"
+    "/boot/grub2/grub.cfg"
+    "/boot/grub/grub.conf"
+    "/boot/efi/EFI/ubuntu/grub.cfg"
+    "/boot/efi/EFI/linuxmint/grub.cfg"
+    "/boot/efi/EFI/BOOT/grub.cfg"
+  )
+
+  for grub_file in "${grub_files[@]}"; do
+    if [[ -f "$grub_file" ]]; then
+      backup_file "$grub_file"
+      chown root:root "$grub_file" &>/dev/null
+      chmod 600 "$grub_file" &>/dev/null
+      log_action "Secured $grub_file (600, root:root)"
+    fi
+  done
+
+  log_action "Enforcing GRUB signature verification..."
+  local grub_default="/etc/default/grub"
+  local grub_custom="/etc/grub.d/40_custom"
+  local needs_update=false
+
+  if [[ -f "$grub_default" ]]; then
+    backup_file "$grub_default"
+
+    if grep -q "^GRUB_VERIFY_SIGNATURES" "$grub_default"; then
+      sed -i 's/^GRUB_VERIFY_SIGNATURES=.*/GRUB_VERIFY_SIGNATURES=true/' "$grub_default"
+    else
+      echo 'GRUB_VERIFY_SIGNATURES=true' >> "$grub_default"
+    fi
+    needs_update=true
+    log_action "Enabled GRUB_VERIFY_SIGNATURES in $grub_default"
+  fi
+
+  if [[ -f "$grub_custom" ]]; then
+    backup_file "$grub_custom"
+
+    local temp_file=$(mktemp)
+    local removed_insecure=false
+
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^set[[:space:]]+superusers || "$line" =~ ^password ]]; then
+        removed_insecure=true
+        continue
+      fi
+      echo "$line" >> "$temp_file"
+    done < "$grub_custom"
+
+    if ! grep -q "^set check_signatures" "$temp_file"; then
+      echo "set check_signatures=enforce" >> "$temp_file"
+    fi
+
+    cat "$temp_file" > "$grub_custom"
+    rm -f "$temp_file"
+
+    [[ "$removed_insecure" == true ]] && log_action "Removed insecure superuser entries from $grub_custom"
+    needs_update=true
+  fi
+
+  if [[ "$needs_update" == true ]] && command -v update-grub &>/dev/null; then
+    update-grub &>/dev/null && log_action "Regenerated GRUB configuration"
+  fi
+
+  # NEED MANUALLY SET GRUB PASSWORD
+  if [[ ! -f /etc/grub.d/01_password ]]; then
+    log_action "GRUB password not configured. Manual steps required:"
+    log_action "  1. sudo grub-mkpasswd-pbkdf2"
+    log_action "  2. Create /etc/grub.d/01_password containing:"
+    log_action "     set superusers=\"admin\""
+    log_action "     password_pbkdf2 admin <YOUR_HASH>"
+    log_action "  3. sudo chmod 600 /etc/grub.d/01_password"
+    log_action "  4. sudo update-grub"
+  else
+    log_action "GRUB password configuration exists at /etc/grub.d/01_password"
+  fi
+
+  log_action "GRUB hardening complete"
+}
+
 #===============================================
 # Firewall
 #===============================================
@@ -2789,6 +2874,7 @@ main() {
   fix_hosts_file
   harden_ssh
   harden_kernel_sysctl
+  harden_grub # need to refactor code this is getting kinda long
   log_action ""
 
   log_action "[ PHASE 6: FIREWALL ]"
