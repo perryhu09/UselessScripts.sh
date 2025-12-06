@@ -1199,6 +1199,151 @@ remove_rbash() {
   [[ $removed -eq 0 ]] && log_action "No restricted bash artifacts found"
 }
 
+# 027 file permission for new files
+enforce_umask() {
+  log_action "=== ENFORCING SECURE UMASK ==="
+
+  local login_defs="/etc/login.defs"
+
+  if [[ -f "$login_defs" ]]; then
+    backup_file "$login_defs"
+    if grep -qE "^\s*UMASK" "$login_defs"; then
+      sed -i 's/^\s*UMASK.*/UMASK 027/' "$login_defs"
+    else
+      echo "UMASK 027" >> "$login_defs"
+    fi
+    log_action "Set UMASK to 027 in $login_defs"
+  fi
+
+  for profile in /etc/profile /etc/bash.bashrc; do
+    if [[ -f "$profile" ]] && ! grep -q "^umask 027" "$profile"; then
+      echo "umask 027" >> "$profile"
+      log_action "Added umask 027 to $profile"
+    fi
+  done
+}
+
+secure_home_directories() {
+  log_action "=== SECURING HOME DIRECTORY PERMISSIONS ==="
+
+  local adjusted=0
+
+  for dir in /home/*; do
+    [[ -d "$dir" ]] || continue
+    local current_perm=$(stat -c "%a" "$dir" 2>/dev/null)
+
+    if [[ "$current_perm" -gt 750 ]]; then
+      chmod 750 "$dir" &>/dev/null
+      ((adjusted++))
+      log_action "Tightened $dir: $current_perm -> 750"
+    fi
+  done
+
+  [[ $adjusted -eq 0 ]] && log_action "All home directories already secure"
+}
+
+# secure /tmp and /dev/shm
+secure_tmp_mount() {
+  log_action "=== SECURING /tmp MOUNT ==="
+
+  [[ -d /tmp ]] && chmod 1777 /tmp &>/dev/null && log_action "Set /tmp sticky bit (1777)"
+
+  if [[ -L /tmp ]]; then
+    log_action "/tmp is a symlink, skipping mount unit"
+    return 0
+  fi
+
+  if ! command -v systemctl &>/dev/null; then
+    log_action "systemctl not available, skipping tmp.mount"
+    return 0
+  fi
+
+  local tmp_mount="/etc/systemd/system/tmp.mount"
+  [[ -f "$tmp_mount" ]] && backup_file "$tmp_mount"
+
+  cat > "$tmp_mount" <<'EOF'
+[Unit]
+Description=Temporary Directory (/tmp)
+Documentation=man:hier(7)
+ConditionPathIsSymbolicLink=!/tmp
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,nosuid,nodev,noexec
+
+[Install]
+WantedBy=local-fs.target
+EOF
+
+  systemctl daemon-reload &>/dev/null
+  systemctl enable tmp.mount &>/dev/null
+  systemctl start tmp.mount &>/dev/null && log_action "Created and started secure tmp.mount" || log_action "tmp.mount enabled (applies on reboot)"
+}
+
+secure_dev_shm() {
+  log_action "=== SECURING /dev/shm ==="
+
+  backup_file /etc/fstab
+
+  if grep -qE '^\s*tmpfs\s+/dev/shm\s+tmpfs' /etc/fstab; then
+    sed -i 's|^\s*tmpfs\s\+/dev/shm\s\+tmpfs\s\+.*|tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0|' /etc/fstab
+    log_action "Updated /dev/shm entry in /etc/fstab"
+  else
+    echo 'tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0' >> /etc/fstab
+    log_action "Added /dev/shm to /etc/fstab"
+  fi
+
+  mount -o remount,noexec,nosuid,nodev /dev/shm &>/dev/null && log_action "Remounted /dev/shm with secure options"
+  chmod 1777 /dev/shm &>/dev/null
+}
+
+# locks doen /proc with hidepid=2 (user can only see their own processes)
+setup_proc_hidepid() {
+  log_action "=== CONFIGURING /proc PROCESS HIDING ==="
+
+  if ! getent group proc &>/dev/null; then
+    groupadd -f proc &>/dev/null
+    log_action "Created 'proc' group"
+  fi
+
+  local proc_gid=$(getent group proc | cut -d: -f3)
+
+  backup_file /etc/fstab
+
+  if grep -qE '^\s*proc\s+/proc\s+proc' /etc/fstab; then
+    sed -i "s|^\s*proc\s\+/proc\s\+proc\s\+.*|proc /proc proc defaults,hidepid=2,gid=$proc_gid 0 0|" /etc/fstab
+    log_action "Updated /proc entry in /etc/fstab"
+  else
+    echo "proc /proc proc defaults,hidepid=2,gid=$proc_gid 0 0" >> /etc/fstab
+    log_action "Added /proc to /etc/fstab"
+  fi
+
+  mount -o remount,hidepid=2,gid="$proc_gid" /proc &>/dev/null && log_action "Remounted /proc with hidepid=2"
+  log_action "Add admins to 'proc' group: usermod -aG proc <user>"
+}
+
+configure_host_conf() {
+  log_action "=== CONFIGURING /etc/host.conf ==="
+
+  local host_conf="/etc/host.conf"
+  [[ -f "$host_conf" ]] && backup_file "$host_conf"
+
+  cat > "$host_conf" <<'EOF'
+order bind,hosts
+multi on
+nospoof on
+EOF
+
+  chown root:root "$host_conf" &>/dev/null
+  chmod 644 "$host_conf" &>/dev/null
+  log_action "Configured anti-spoofing in $host_conf"
+}
+
 configure_screen_security() {
   log_action "=== CONFIGURING SCREEN TIMEOUT AND LOCKING ==="
 
@@ -3037,6 +3182,12 @@ main() {
   harden_kernel_sysctl
   harden_grub # need to refactor code this is getting kinda long
   remove_rbash
+  enforce_umask
+  secure_home_directories
+  secure_tmp_mount
+  secure_dev_shm
+  setup_proc_hidepid
+  configure_host_conf
   configure_screen_security
   disable_xserver_tcp
   validate_gdm3_config #helper
