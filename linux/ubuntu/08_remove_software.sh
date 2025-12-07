@@ -1,0 +1,122 @@
+#===============================================
+# Packages, Software
+#===============================================
+
+remove_unauthorized_software() {
+  log_action "=== REMOVING UNAUTHORIZED SOFTWARE ==="
+
+  local BLACKLIST_FILE="${1:-}"
+
+  # If no file provided, skip this function
+  if [[ -z "$BLACKLIST_FILE" ]]; then
+    log_action "WARNING: No package blacklist file provided"
+    log_action "Usage: remove_unauthorized_software <blacklist_file>"
+    log_action "Skipping software removal..."
+    return 0
+  fi
+
+  # Check if file exists
+  if [[ ! -f "$BLACKLIST_FILE" ]]; then
+    log_action "ERROR: Package blacklist file not found: $BLACKLIST_FILE"
+    return 1
+  fi
+
+  log_action "Reading prohibited packages from: $BLACKLIST_FILE"
+
+  # Read packages from file (one per line, ignore comments and empty lines)
+  local package_count=0
+  local removed_count=0
+
+  while IFS= read -r package || [[ -n "$package" ]]; do
+    # Skip empty lines and comments
+    [[ -z "$package" || "$package" =~ ^[[:space:]]*# ]] && continue
+
+    # Clean up whitespace
+    package=$(echo "$package" | xargs)
+    [[ -z "$package" ]] && continue
+
+    ((package_count++))
+
+    # Check if package is installed
+    if dpkg -l 2>/dev/null | grep -q "^ii  $package "; then
+      log_action "Removing package: $package"
+      if apt purge -y "$package" &>/dev/null; then
+        ((removed_count++))
+        log_action "Successfully removed: $package"
+      else
+        log_action "Failed to remove: $package"
+      fi
+    else
+      log_action "Package $package not installed (skipping)"
+    fi
+  done <"$BLACKLIST_FILE"
+
+  # Clean up dependencies
+  log_action "Cleaning up orphaned dependencies..."
+  apt autoremove -y &>/dev/null
+
+  log_action "Processed $package_count packages, removed $removed_count"
+}
+
+# Implement another function for auditing installed packages?
+
+remove_prohibited_media() {
+  log_action "=== SCANNING FOR PROHIBITED MEDIA FILES ==="
+
+  MEDIA_EXTENSIONS=(
+      # Audio formats
+      "*.mp3"
+      "*.ogg"
+      "*.wav"
+      "*.m4a"
+      "*.aac"
+      "*.wma"
+      "*.flac"
+      
+      # Video formats
+      "*.mp4"
+      "*.avi"
+      "*.mkv"
+      "*.mov"
+      "*.flv"
+      "*.wmv"
+      "*.webm"
+      "*.mpeg"
+      "*.mpg"
+      "*.3gp"
+      
+      # Archive formats (for prohibited software)
+      "*.zip"
+      "*.tar"
+      "*.tar.gz"
+      "*.tgz"
+      "*.rar"
+      "*.7z"
+      "*.bz2"
+      "*.xz"
+      
+      # Image formats (sometimes prohibited)
+      "*.jpg"
+      "*.jpeg"
+      "*.png"
+      "*.gif"
+      "*.bmp"
+      "*.tiff"
+      "*.webp"
+      
+      # Other suspicious files
+      "*.flag"
+      "*.torrent"
+  )
+
+  log_action "NOTE: MAKE SURE TO MANUALLY REVIEW THIS SECTION"
+  log_action ""
+  for ext in "${MEDIA_EXTENSIONS[@]}"; do
+    find /home -type f -name "$ext" 2>/dev/null | while read file; do
+      log_action "PROHIBITED MEDIA FOUND: $file"
+      # rm -f "$file"
+    done
+  done
+
+  log_action "Possible prohibited media found (NOT REMOVED)"
+}
