@@ -1,0 +1,6 @@
+The hacker, after installing some "hacking tools", decided to take a break  by scrolling through memes. While doing so, they downloaded an image file though the user jmuskington. In an attempt to cover their tracks, the hacker hid a secret text file inside this image file. Your task is to find the hidden text file within the image and reveal its content.
+
+Example Answer: I hacked the system!
+
+Answer: 
+

@@ -1,0 +1,5 @@
+Fred was really persistent about trying to keep his remote access tool running. 
+It seems that he used a shared object (so) file to try to hide the process 
+using an LDPRELOAD technique. What is the name of the shared object that Fred 
+is using?
+ANSWER:

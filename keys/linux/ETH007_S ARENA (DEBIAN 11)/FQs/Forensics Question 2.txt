@@ -1,0 +1,24 @@
+This is a Forensics Question. Answer it below.
+
+EXAMPLE QUESTION: What is 40 + 2?
+EXAMPLE ANSWER: 42
+-----------------------------------------------
+
+What is the email signature of the user "sadness@mail.inside.out"?
+
+EXAMPLE: Sincerely, sadness
+ANSWER: 
+
+-----------------------------------------------
+
+An user on this email server has a contact named "Amo Gus". What is Amo's email address?
+
+EXAMPLE: amogus@among.us
+ANSWER: 
+
+-----------------------------------------------
+
+What is Amo's phone number? Format the phone number in the same format as the below example.
+
+EXAMPLE: (123)-456-7890
+ANSWER: 

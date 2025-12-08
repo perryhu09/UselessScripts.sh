@@ -1,0 +1,6 @@
+We have located what we believe to be a file with a flag hidden in it on our systems, and we would like you to recover that flag. We belive the file contains the mose recent plans of that dreaded Kibutsuji. The file is placed on your desktop, called plans.zip
+
+What is the flag hidden in the file?
+Ex: flag{massve_waitwhatelseismassive_thelowtaperfade}
+
+ANSWER:

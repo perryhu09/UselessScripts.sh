@@ -1,0 +1,17 @@
+FORENSICS QUESTION 2
+=====================
+
+We believe the attackers breached this machine due to sensitive documents on our Seafile instance being publicly available. Please investigate and report back with the following information.
+
+What is the link that leads to the publicly available files?
+EX: https://discord.gg/cyberpatriot
+ANSWER:
+
+What sensitive document(s) were being shared? (HINT: There may be more than one)
+EX: Document.docx
+ANSWER:
+
+What was the ID of the Seafile library the files belonged to? 
+EX: 3e54bef9-f6f2-4a96-beb2-d22088c15220
+ANSWER:
+

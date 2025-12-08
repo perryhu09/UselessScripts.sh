@@ -1,0 +1,9 @@
+FORENSICS QUESTION 1
+=====================
+
+The evil wizards from Mario have taken over our entire system and prevented us from gaining privileged access again. Luckily, Nintendo HQ said they left a binary behind that could give them their original privileges back and take the system back over. What is the binary left behind?
+EX: /sbin/systemctl
+ANSWER: 
+
+What is the note left behind in the root home directory by the evil wizards?
+ANSWER: 

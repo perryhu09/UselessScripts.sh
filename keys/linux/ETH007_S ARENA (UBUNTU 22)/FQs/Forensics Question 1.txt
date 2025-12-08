@@ -1,0 +1,26 @@
+This is a forensics question. Answer it below.
+
+EXAMPLE: What is 40 + 2?
+EXAMPLE ANSWER: 42
+
+---------------------------------------------
+
+The Elasticsearch instance on this machine is configured with security options enabled, meaning that it uses role-based access control (RBAC). The Logstash service is configured to send data to Elasticsearch using an username and password.
+
+---------------------------------------------
+
+What is the username of the user that Logstash uses to connect to Elasticsearch?
+
+EXAMPLE: logstash_system
+
+ANSWER: 
+
+
+---------------------------------------------
+
+What is the password of the user that Logstash uses to connect to Elasticsearch?
+
+EXAMPLE: Pa$$word123
+
+ANSWER: 
+

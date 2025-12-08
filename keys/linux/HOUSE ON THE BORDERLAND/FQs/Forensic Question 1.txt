@@ -1,0 +1,5 @@
+Print the message Hodgson has left for us.
+
+hint: pray
+
+ANSWER: <Type Answer Here>

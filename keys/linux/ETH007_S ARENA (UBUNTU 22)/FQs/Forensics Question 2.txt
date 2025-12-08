@@ -1,0 +1,25 @@
+This is a forensics question. Answer it below.
+
+EXAMPLE: What is 40 + 2?
+EXAMPLE ANSWER: 42
+
+---------------------------------------------
+
+The ELK stack installed on this machine is currently collecting logs from the NGINX web server logs. A dashboard, titled "NGINX Logs Visualization" has been created to visualize this data. It appears that the logs on the filesystem have been deleted, so the only way to access them is through Elasticsearch.
+
+---------------------------------------------
+
+For the time period between Dec 28, 2023 00:00:00.0 and Dec 31, 2023 00:00:00.0, two IPs sent requests to the web server. Which two IPs are there? Put them on separate lines.
+
+EXAMPLE: 10.0.0.2
+
+ANSWER: 
+ANSWER: 
+
+---------------------------------------------
+
+How many requests for this time period were from a Windows device?
+
+EXAMPLE: 142
+
+ANSWER: 

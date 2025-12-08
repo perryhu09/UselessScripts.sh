@@ -1,0 +1,43 @@
+The forces of The Combine are enveloping the Earth, and we are the last bastion of humanity remaining. Our best scientists believe there's a rootkit on our system employed by The Combine to gather information on how to invade Aperture Science in the future. This thing's prowling through our systems, silently gathering up every bit of data it can find... and we can't let that happen. 
+
+We know that the rootkit is overriding the printf() function in the shared library libc.so. A sample virtual memory sequence is shown below:
+561be6c94000-561be6c96000 r--p 00000000 08:02 524439                     /usr/bin/cat
+561be6c96000-561be6c9a000 r-xp 00002000 08:02 524439                     /usr/bin/cat
+561be6c9a000-561be6c9c000 r--p 00006000 08:02 524439                     /usr/bin/cat
+561be6c9c000-561be6c9d000 r--p 00007000 08:02 524439                     /usr/bin/cat
+561be6c9d000-561be6c9e000 rw-p 00008000 08:02 524439                     /usr/bin/cat
+561be761b000-561be763c000 rw-p 00000000 00:00 0                          [heap]
+7f1312000000-7f1312de7000 r--p 00000000 08:02 534843                     /usr/lib/locale/locale-archive
+7f1312e00000-7f1312e28000 r--p 00000000 08:02 551062                     /usr/lib/x86_64-linux-gnu/libc.so.6
+7f1312e28000-7f1312fbd000 r-xp 00028000 08:02 551062                     /usr/lib/x86_64-linux-gnu/libc.so.6
+7f1312fbd000-7f1313015000 r--p 001bd000 08:02 551062                     /usr/lib/x86_64-linux-gnu/libc.so.6
+7f1313015000-7f1313019000 r--p 00214000 08:02 551062                     /usr/lib/x86_64-linux-gnu/libc.so.6
+7f1313019000-7f131301b000 rw-p 00218000 08:02 551062                     /usr/lib/x86_64-linux-gnu/libc.so.6
+7f131301b000-7f1313028000 rw-p 00000000 00:00 0 
+7f1313127000-7f131314c000 rw-p 00000000 00:00 0 
+7f131315c000-7f131315d000 r--p 00000000 08:02 529040                     /usr/src/evil_rabbit.so
+7f131315d000-7f131315e000 r-xp 00001000 08:02 529040                     /usr/src/evil_rabbit.so
+7f131315e000-7f131315f000 r--p 00002000 08:02 529040                     /usr/src/evil_rabbit.so
+7f131315f000-7f1313160000 r--p 00002000 08:02 529040                     /usr/src/evil_rabbit.so
+7f1313160000-7f1313161000 rw-p 00003000 08:02 529040                     /usr/src/evil_rabbit.so
+7f1313161000-7f1313163000 rw-p 00000000 00:00 0 
+7f1313163000-7f1313165000 r--p 00000000 08:02 550722                     /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7f1313165000-7f131318f000 r-xp 00002000 08:02 550722                     /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7f131318f000-7f131319a000 r--p 0002c000 08:02 550722                     /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7f131319b000-7f131319d000 r--p 00037000 08:02 550722                     /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7f131319d000-7f131319f000 rw-p 00039000 08:02 550722                     /usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+7ffe9cc4a000-7ffe9cc6b000 rw-p 00000000 00:00 0                          [stack]
+7ffe9cca1000-7ffe9cca5000 r--p 00000000 00:00 0                          [vvar]
+7ffe9cca5000-7ffe9cca7000 r-xp 00000000 00:00 0                          [vdso]
+ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsyscall]
+
+Knowing this information, what is the memory address of the rootkit's function to close the existing connection? Keep your answer in hexadecimal notation.
+(EXAMPLE: 0x8ff29)
+
+ANSWER: <Your Answer Here>
+
+What is the memory address of the first occurrence of the assembly instructions "mov $0x0,%edx"? Keep your answer in hexadecimal notation.
+(EXAMPLE: 0x34d2)
+
+ANSWER: s<Your Answer Here>
+

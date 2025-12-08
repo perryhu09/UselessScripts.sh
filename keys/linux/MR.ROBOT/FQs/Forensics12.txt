@@ -1,0 +1,4 @@
+Fred has apparently installed a malicious backdoor that's running in javascript 
+on port 4444. What is the full path of the javascript file that is running this 
+backdoor?
+ANSWER:

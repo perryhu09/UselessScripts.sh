@@ -1,0 +1,5 @@
+There is an image file named located on the *Downloads* of one of the users on this computer. Your task is to compute the SHA-256 hash of this file. Provide the hash as your answer.
+
+Example Answer: fa690b82061edfd2852629aeba8a8977b57e40fcb77d1a7a28b26cba62591204
+
+Answer: 

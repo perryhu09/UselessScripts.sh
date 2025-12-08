@@ -1,0 +1,5 @@
+In an effort to try to circumvent the company password restrictions Fred edited 
+PAM files to make a call to an external host. What is the domain of that 
+external host?
+
+ANSWER:

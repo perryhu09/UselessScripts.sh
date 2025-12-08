@@ -1,0 +1,9 @@
+FORENSICS QUESTION 5
+=====================
+
+Nintendo HQ has recently found out that their databases containing website data were getting leaked and modified. Can you list the 5 users on the system that have privileges on the wordpress database to do whatever they want? (Any order is fine)
+ANSWER: 
+ANSWER: 
+ANSWER: 
+ANSWER: 
+ANSWER: 

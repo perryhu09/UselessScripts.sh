@@ -1,0 +1,13 @@
+Wheatley's maniacal takeover of Aperture Science was marked by a pulse-pounding anthem that rocked the facility. Cave Johnson himself is on a mission to retrieve that banger of a soundtrack, but Wheatley played it through the facility speakers during a Firefox private session. Fortunately, we have a physical memory dump of the Aperture Science mainframe at the time of Wheatley's takeover, which is located on your desktop as dump.mem
+
+What is the video ID of the soundtrack?
+(EXAMPLE: dQw4w9WgXcQ)
+
+ANSWER: <Your Answer Here>
+
+The Firefox private session also had an online copy of the Aperture Science Enrichment Center Volunteer Application Form. Given that our local copy of the application form was permanently deleted when Wheatley took over, we're going to need it back... even if Wheatley changed many of the questions to make no sense. And once you retrieve the volunteer application form, please tell us what the answer to question 24 is, since your annual competency check is past due.
+
+What is the answer to question 24 on the Aperture Science Enrichment Center Volunteer Application Form?
+(EXAMPLE: answer-here)
+
+ANSWER: <Your Answer Here>

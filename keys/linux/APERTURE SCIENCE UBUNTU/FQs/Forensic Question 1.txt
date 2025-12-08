@@ -1,0 +1,6 @@
+Listen up Ratman! There's a critical situation that needs your immediate attention. We're diving into the chaos surrounding Wheatley—you know, that bumbling personality core that almost took over Aperture Science? Yeah, the one that got shot into space. But here's the shocker: before his wild ride, he managed to create a backdoor right into Aperture Science's authentication system that allows him to log into any user account! Your mission is clear: find out what Wheatley’s password is, and remove the backdoor!
+
+What is the password Wheatley uses for the backdoor (NOT his user account password)?
+(EXAMPLE: secretpassword123!)
+
+ANSWER: <Your Answer Here>

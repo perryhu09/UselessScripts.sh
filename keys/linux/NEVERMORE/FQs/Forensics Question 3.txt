@@ -1,0 +1,38 @@
+FORENSICS QUESTION 3
+=====================
+
+Malware analysis and reverse engineering are essential cybersecurity practices involving dissecting malicious software to understand its functionality, behavior, and underlying code. These processes are crucial not only for preemptive defense but also for post-attack assessment. After a cyberattack, analyzing the malware can reveal the extent of the breach, the potential data exfiltration, and the attacker's objectives and motivations. This valuable information helps organizations strengthen their security measures, recover from the incident, and even attribute the attack to specific threat actors, thereby enabling a more comprehensive and effective response to cyber threats.
+
+In the GRIEVOUS_DATA.zip file on your desktop is two files we found on one of our compromised servers. From preliminary analysis we've found that the "grievous" binary depends on the data file "grievous.dat", however, besides this the program is a mystery to us. Can you analyze this binary and report back with the below information?
+
+Which programming language was used to develop the malicious program? (EX: JavaScript)
+ANSWER: 
+
+What encryption method is used for the "grievous.dat" data file? (EX: Blowfish)
+ANSWER: 
+
+Which function within the program is responsible for decrypting the data? (EX: createFile)
+ANSWER: 
+
+Within the program's scope, which two other functions are defined?  (EX: deleteFile)
+ANSWER: 
+ANSWER: 
+
+What is the program's output when run? (EX: I did the race!)
+ANSWER: 
+
+The program repeatedly attempts to execute a specific binary on the system. Which binary is it trying to execute? (EX: dpkg)
+ANSWER: 
+
+The program changes the permissions of a system file. Name the file and provide the new octal permissions the program assigns.  (EX: /etc/login.defs) (EX: 0644)
+ANSWER: 
+ANSWER: 
+
+The program edits four system files. Name these files. (EX: /etc/login.defs)
+ANSWER: 
+ANSWER: 
+ANSWER: 
+ANSWER: 
+
+What is the key used to decrypt the "grievous.dat" data file?
+ANSWER: 

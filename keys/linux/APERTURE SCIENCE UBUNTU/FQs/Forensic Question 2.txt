@@ -1,0 +1,7 @@
+We've got a full-blown emergency on our hands, and time's ticking like crazy! Wheatley, that maniac personality core from Aperture Science, has gone off the deep end, and he's rigged a script that's causing our thermonuclear core to overheat in 30 minute intervals. Picture this: labs melting at 4000 degrees Kelvin, systems crashing, and all operations coming to a halt, including this device. Furthermore, Wheatley has hidden a message within the script that contains top-secret intel on our testing operations. We cannot allow this information to spread to our test subjects! Ratman, you have to destroy the script wreaking havoc on our systems and give us the secret hidden inside of it!
+
+
+What is the secret hidden in Wheatley's script?
+(EXAMPLE: top-secret-hidden-message)
+
+ANSWER: <Your Answer Here>

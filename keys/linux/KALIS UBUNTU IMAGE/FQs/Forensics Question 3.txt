@@ -1,0 +1,44 @@
+Instructions:
+
+1) Type the answer to the question in place of 
+<Type Answer Here>
+
+2) Save the file (you will not get credit until the 
+file is saved)
+
+Example question (not scored):
+
+What was the name of the Lone Ranger's horse?
+
+ANSWER: <Type Answer Here>
+
+After correctly answering the question, the example 
+question would look like this:
+
+What was the name of the Lone Ranger's horse?
+
+ANSWER: Silver
+
+If the question has more than one answer, place each 
+answer on a separate line, for example:
+
+What was the name of the Lone Ranger's horse?
+
+ANSWER: Silver
+ANSWER: Dusty
+
+Remember to save the file after typing the answer.
+The scored question appears below.
+
+===========================================================
+
+Create one string that satisfies both the following RegEx's:
+
+(R|r|l)[0-9]+(g)[eskwoi][T-Z]?\s+[^0-9A-z][r-w]{1}\sV[3-4]{1}rY\s[a-f](U|u)[N-Z]+
+
+[R-Z]{1}3?[a-z]{1}[a-g]+[A-X]+\s\!(A|s|d|E|g)?\s[A-z]+[^4sp2o]?[a-z]{1,}[X-Z]?\D[^a-e]{1}[a-z]?(N|O){1}
+
+( EXAMPLE: $ao.123 )
+
+ANSWER: <Type Answer Here>
+

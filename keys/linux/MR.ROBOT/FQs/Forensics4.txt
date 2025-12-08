@@ -1,0 +1,8 @@
+We've had detections of compromised binaries that are backdoored to call out to 
+the host ifconfig.me. These binaries are present on this host, what are the 
+md5sums of these binaries so that we can use them as Indicators of Compromise 
+(IOCs) to share out to the community so that others might also detect when 
+they're compromised.
+
+ANSWER:
+ANSWER:

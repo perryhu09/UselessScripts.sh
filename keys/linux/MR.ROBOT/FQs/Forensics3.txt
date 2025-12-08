@@ -1,0 +1,4 @@
+An Elasticsearch and Kibana frontend have been installed on this host. This is 
+also called an ELK stack with combined with Logstash. There is a dashboard set 
+up for the elastic user. What is the title of the dashboard?
+ANSWER:
