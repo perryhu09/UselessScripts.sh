@@ -968,6 +968,19 @@ run_os_settings() {
     fix_hosts_file
     harden_ssh
     configure_firewall
+    harden_kernel_sysctl
+    verify_sysctl_settings
+    harden_grub
+    remove_rbash
+    enforce_umask
+    secure_home_directories
+    secure_tmp_mount
+    secure_dev_shm
+    setup_proc_hidepid
+    configure_host_conf
+    configure_screen_security
+    disable_xserver_tcp
+    validate_gdm3_config
 
     log_success "OS Settings completed"
 }

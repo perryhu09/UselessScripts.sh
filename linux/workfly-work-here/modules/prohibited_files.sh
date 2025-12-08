@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: File Permissions and Prohibited Files
 # Category: File Security
 # Description: File Permissions and Prohibited Files
-
+secure_file_permissions() {
   log_action "=== SECURING FILE PERMISSIONS ==="
 
   local fixed_count=0
@@ -852,6 +852,7 @@ find_orphaned_files() {
 # Main runner
 run_prohibited_files() {
     log_section "Starting Prohibited Files and Permissions Check"
+    secure_file_permissions
     verify_critical_file_permissions
     fix_sudoers_nopasswd
     find_world_writable_files

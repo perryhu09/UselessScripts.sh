@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: Ftp Hardening
 # Category: Service Hardening
 # Description: Hardens Ftp configuration
-
+harden_ftp() {
   log_action "=== HARDENING VSFTP ==="
 
   local config=""

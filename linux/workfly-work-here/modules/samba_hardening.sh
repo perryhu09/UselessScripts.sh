@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: Samba Hardening
 # Category: Service Hardening
 # Description: Hardens Samba configuration
-
+harden_samba(){
   log_action "=== HARDENING SAMBA CONFIGURATION ==="
 
   if ! command -v smbd &>/dev/null; then

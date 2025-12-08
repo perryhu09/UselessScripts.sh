@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: Php Hardening
 # Category: Service Hardening
 # Description: Hardens Php configuration
-
+harden_php(){
   log_action "=== HARDENING PHP CONFIGURATION ==="
 
   if [ ! -d "/etc/php" ]; then
@@ -80,7 +80,7 @@ EOF
     done
   done
 
-  log_action "Hardended $hardened_count PHP configuration(s)"
+  log_action "Hardened $hardened_count PHP configuration(s)"
 
   log_action "Searching for phpinfo files..."
   local phpinfo_patterns=("phpinfo.php" "info.php" "test.php" "pi.php" "php_info.php")

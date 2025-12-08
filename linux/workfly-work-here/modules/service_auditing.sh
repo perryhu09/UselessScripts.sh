@@ -81,7 +81,7 @@ audit_running_services() {
 # Main runner
 run_service_auditing() {
     log_section "Starting Service Auditing"
-    disable_unnecessary_services
+    disable_unnecessary_services "../" #TODO: this
     audit_running_services
     log_success "Service Auditing completed"
 }

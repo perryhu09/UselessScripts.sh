@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: Nginx Hardening
 # Category: Service Hardening
 # Description: Hardens Nginx configuration
-
+harden_nginx() {
   log_action "=== HARDENING NGINX CONFIGURATION ==="
 
   if ! command -v nginx &>/dev/null; then

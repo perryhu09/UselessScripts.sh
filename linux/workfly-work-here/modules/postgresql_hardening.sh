@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: Postgresql Hardening
 # Category: Service Hardening
 # Description: Hardens Postgresql configuration
-
+harden_postgresql(){
   log_action "=== HARDENING POSTGRESQL CONFIGURATION ==="
 
   if ! command -v psql &>/dev/null; then

@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: Operating System Updates
 # Category: System Updates
 # Description: Operating System Updates
-
+enable_security_updates(){
     log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
 
     sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
@@ -139,6 +139,7 @@ install_security_dependencies() {
 # Main runner
 run_os_updates() {
     log_section "Starting OS Updates and Security Patches"
+    enable_security_updates
     configure_automatic_updates
     update_system
     install_security_dependencies

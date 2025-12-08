@@ -7,7 +7,7 @@ source "$SCRIPT_DIR/../lib/utils.sh"
 # Module: User Auditing and Management
 # Category: User Security
 # Description: User Auditing and Management
-
+remove_unauthorized_users() {
   log_action "=== CHECKING FOR UNAUTHORIZED USERS ==="
 
   CURRENT_USERS=$(awk -F: '($3 >=1000 || $3 == 0) && $1 != "nobody" {print $1}' /etc/passwd)
@@ -231,6 +231,7 @@ lock_root_account() {
 # Main runner
 run_user_auditing() {
     log_section "Starting User Auditing"
+    remove_unauthorized_users
     fix_admin_group
     check_uid_zero
     check_group_sudo_privileges

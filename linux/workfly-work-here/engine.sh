@@ -8,6 +8,9 @@ set -euo pipefail
 ENGINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ENGINE_DIR
 
+AUTHORIZED_USERS=()
+ADMIN_USERS=()
+
 # Load utilities
 source "$ENGINE_DIR/lib/utils.sh"
 
