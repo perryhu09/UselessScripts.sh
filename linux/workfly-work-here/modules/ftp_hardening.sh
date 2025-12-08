@@ -1,4 +1,13 @@
-harden_vsftp() {
+#!/bin/bash
+# ftp_hardening.sh - Ftp Hardening Module
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Ftp Hardening
+# Category: Service Hardening
+# Description: Hardens Ftp configuration
+
   log_action "=== HARDENING VSFTP ==="
 
   local config=""
@@ -113,3 +122,11 @@ harden_vsftp() {
 
   log_action "vsftpd hardening complete"
 }
+# Main runner
+run_ftp_hardening() {
+    log_section "Starting Ftp Hardening"
+    harden_ftp
+    log_success "Ftp Hardening completed"
+}
+
+export -f run_ftp_hardening

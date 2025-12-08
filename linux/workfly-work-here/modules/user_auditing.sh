@@ -1,8 +1,13 @@
-#===============================================
-# Users && Groups
-#===============================================
+#!/bin/bash
+# user_auditing.sh - User Auditing and Management
 
-remove_unauthorized_users() {
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: User Auditing and Management
+# Category: User Security
+# Description: User Auditing and Management
+
   log_action "=== CHECKING FOR UNAUTHORIZED USERS ==="
 
   CURRENT_USERS=$(awk -F: '($3 >=1000 || $3 == 0) && $1 != "nobody" {print $1}' /etc/passwd)
@@ -222,3 +227,17 @@ lock_root_account() {
     return 1
   fi
 }
+
+# Main runner
+run_user_auditing() {
+    log_section "Starting User Auditing"
+    fix_admin_group
+    check_uid_zero
+    check_group_sudo_privileges
+    disable_guest
+    set_all_user_passwords
+    lock_root_account
+    log_success "User Auditing completed"
+}
+
+export -f run_user_auditing

@@ -1,3 +1,12 @@
+#!/bin/bash
+# mysql_hardening.sh - Mysql Hardening Module
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Mysql Hardening
+# Category: Service Hardening
+# Description: Hardens Mysql configuration
 
 harden_mysql() {
   log_action "=== HARDENING MYSQL/MARIADB CONFIGURATION ==="
@@ -158,3 +167,11 @@ EOF
 
   log_action "MySQL hardening complete"
 }
+# Main runner
+run_mysql_hardening() {
+    log_section "Starting Mysql Hardening"
+    harden_mysql
+    log_success "Mysql Hardening completed"
+}
+
+export -f run_mysql_hardening

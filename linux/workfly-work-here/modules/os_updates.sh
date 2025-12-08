@@ -1,8 +1,13 @@
-#===============================================
-# System Updates
-#===============================================
+#!/bin/bash
+# os_updates.sh - Operating System Updates
 
-enable_security_updates() {
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Operating System Updates
+# Category: System Updates
+# Description: Operating System Updates
+
     log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
 
     sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
@@ -130,3 +135,14 @@ install_security_dependencies() {
     fi
   done
 }
+
+# Main runner
+run_os_updates() {
+    log_section "Starting OS Updates and Security Patches"
+    configure_automatic_updates
+    update_system
+    install_security_dependencies
+    log_success "OS Updates and Security Patches completed"
+}
+
+export -f run_os_updates

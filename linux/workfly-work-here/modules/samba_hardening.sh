@@ -1,4 +1,13 @@
-harden_samba() {
+#!/bin/bash
+# samba_hardening.sh - Samba Hardening Module
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Samba Hardening
+# Category: Service Hardening
+# Description: Hardens Samba configuration
+
   log_action "=== HARDENING SAMBA CONFIGURATION ==="
 
   if ! command -v smbd &>/dev/null; then
@@ -180,3 +189,11 @@ EOF
   log_action "Security applied: SMBv1 disabled, encryption required, guest disabled, NTLMv1 disabled, signing mandatory"
   log_action "Next steps: Add users with 'smbpasswd -a <user>' and 'usermod -aG samba_users <user>'"
 }
+# Main runner
+run_samba_hardening() {
+    log_section "Starting Samba Hardening"
+    harden_samba
+    log_success "Samba Hardening completed"
+}
+
+export -f run_samba_hardening

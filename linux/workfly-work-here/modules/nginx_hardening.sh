@@ -1,4 +1,13 @@
-harden_nginx() {
+#!/bin/bash
+# nginx_hardening.sh - Nginx Hardening Module
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Nginx Hardening
+# Category: Service Hardening
+# Description: Hardens Nginx configuration
+
   log_action "=== HARDENING NGINX CONFIGURATION ==="
 
   if ! command -v nginx &>/dev/null; then
@@ -136,3 +145,11 @@ EOF
 
   log_action "NGINX hardening complete"
 }
+# Main runner
+run_nginx_hardening() {
+    log_section "Starting Nginx Hardening"
+    harden_nginx
+    log_success "Nginx Hardening completed"
+}
+
+export -f run_nginx_hardening

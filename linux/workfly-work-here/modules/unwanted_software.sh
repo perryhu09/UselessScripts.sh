@@ -1,6 +1,12 @@
-#===============================================
-# Packages, Software
-#===============================================
+#!/bin/bash
+# unwanted_software.sh - Unwanted Software Removal
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Unwanted Software Removal
+# Category: Software Management
+# Description: Unwanted Software Removal
 
 remove_unauthorized_software() {
   log_action "=== REMOVING UNAUTHORIZED SOFTWARE ==="
@@ -120,3 +126,13 @@ remove_prohibited_media() {
 
   log_action "Possible prohibited media found (NOT REMOVED)"
 }
+
+# Main runner
+run_unwanted_software() {
+    log_section "Starting Unwanted Software Removal"
+    remove_unauthorized_software "$@"
+    remove_prohibited_media
+    log_success "Unwanted Software Removal completed"
+}
+
+export -f run_unwanted_software

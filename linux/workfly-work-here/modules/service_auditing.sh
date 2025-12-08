@@ -1,8 +1,13 @@
+#!/bin/bash
+# service_auditing.sh - Service Auditing
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
 
-#===============================================
-# Services
-#===============================================
+# Module: Service Auditing
+# Category: Service Management
+# Description: Service Auditing
+
 
 disable_unnecessary_services() {
   log_action "=== DISABLING UNNECESSARY SERVICES ==="
@@ -72,3 +77,13 @@ audit_running_services() {
 
   log_action "Perform manual review of log for services that shouldn't be running"
 }
+
+# Main runner
+run_service_auditing() {
+    log_section "Starting Service Auditing"
+    disable_unnecessary_services
+    audit_running_services
+    log_success "Service Auditing completed"
+}
+
+export -f run_service_auditing

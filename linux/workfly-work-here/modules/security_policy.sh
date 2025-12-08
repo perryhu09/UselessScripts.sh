@@ -1,7 +1,12 @@
+#!/bin/bash
+# security_policy.sh - Security Policy and Auditing
 
-#==============================================
-# Auditd
-#==============================================
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Security Policy and Auditing
+# Category: System Auditing
+# Description: Security Policy and Auditing
 
 harden_auditd() {
   log_action "=== HARDENING AUDITD (SYSTEM AUDITING) ==="
@@ -140,3 +145,14 @@ audit_with_lynis() {
   log_action "Full report available at: /var/log/lynis-report.dat"
   log_action "Lynis security audit completed"
 }
+
+# Main runner
+run_security_policy() {
+    log_section "Starting Security Policy Configuration"
+    harden_auditd
+    enable_app_armor
+    audit_with_lynis
+    log_success "Security Policy Configuration completed"
+}
+
+export -f run_security_policy

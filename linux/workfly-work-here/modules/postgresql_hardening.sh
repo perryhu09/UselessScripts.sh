@@ -1,4 +1,13 @@
-harden_postgresql() {
+#!/bin/bash
+# postgresql_hardening.sh - Postgresql Hardening Module
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: Postgresql Hardening
+# Category: Service Hardening
+# Description: Hardens Postgresql configuration
+
   log_action "=== HARDENING POSTGRESQL CONFIGURATION ==="
 
   if ! command -v psql &>/dev/null; then
@@ -188,3 +197,11 @@ EOF
   log_action "PostgreSQL hardening complete"
   log_action "NOTE: Set postgres password with: sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'STRONG_PASSWORD';\""
 }
+# Main runner
+run_postgresql_hardening() {
+    log_section "Starting Postgresql Hardening"
+    harden_postgresql
+    log_success "Postgresql Hardening completed"
+}
+
+export -f run_postgresql_hardening

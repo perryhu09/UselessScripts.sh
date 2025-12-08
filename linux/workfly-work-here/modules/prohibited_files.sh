@@ -1,8 +1,13 @@
-#===============================================
-# File Permissions
-#===============================================
+#!/bin/bash
+# prohibited_files.sh - File Permissions and Prohibited Files
 
-secure_file_permissions() {
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/utils.sh"
+
+# Module: File Permissions and Prohibited Files
+# Category: File Security
+# Description: File Permissions and Prohibited Files
+
   log_action "=== SECURING FILE PERMISSIONS ==="
 
   local fixed_count=0
@@ -843,3 +848,16 @@ find_orphaned_files() {
     log_action "    To fix: chown root:root $file"
   done < <(find / "${exclude_paths[@]}" \( -nouser -o -nogroup \) -print 2>/dev/null)
 }
+
+# Main runner
+run_prohibited_files() {
+    log_section "Starting Prohibited Files and Permissions Check"
+    verify_critical_file_permissions
+    fix_sudoers_nopasswd
+    find_world_writable_files
+    check_suid_sgid
+    find_orphaned_files
+    log_success "Prohibited Files and Permissions Check completed"
+}
+
+export -f run_prohibited_files
