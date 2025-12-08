@@ -1,0 +1,46 @@
+Instructions:
+
+1) Type the answer to the question in place of 
+<Type Answer Here>
+
+2) Save the file (you will not get credit until the 
+file is saved)
+
+Example question (not scored):
+
+What was the name of the Lone Ranger's horse?
+
+ANSWER: <Type Answer Here>
+
+After correctly answering the question, the example 
+question would look like this:
+
+What was the name of the Lone Ranger's horse?
+
+ANSWER: Silver
+
+If the question has more than one answer, place each 
+answer on a separate line, for example:
+
+What was the name of the Lone Ranger's horse?
+
+ANSWER: Silver
+ANSWER: Dusty
+
+Remember to save the file after typing the answer.
+The scored question appears below.
+
+===========================================================
+
+Creators of practice images put in a lot of time and effort,
+and are probably the only reason that you have niche and
+unique competition knowledge. These people work very hard
+just to enrich and educate the populus of High School
+Cybersecurity.
+
+Who is the creator of this practice image?
+
+( EXAMPLE: ANSWER: Max49 ) <- Username
+( EXAMPLE: ANSWER: Max49#9833 ) <- Discord tag
+
+ANSWER: <Type Answer Here>

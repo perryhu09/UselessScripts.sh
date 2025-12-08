@@ -1,0 +1,9 @@
+In Fred's home directory, the Documents directory has been zipped and encrypted 
+by a ransomware system. The zip is encrypted with a secret key. The key is 
+usually stored in a file named secret.txt, but it appears to be hidden. See if 
+you can discover the hidden file and decrypt the zip. The zip password is 
+historically 20 characters long with upper case, lower case, and numbers.
+Inside the directory is an Employee Forms pdf. Please enter the md5sum of the 
+pdf here to show that it's been successfully decrypted.
+
+ANSWER: 

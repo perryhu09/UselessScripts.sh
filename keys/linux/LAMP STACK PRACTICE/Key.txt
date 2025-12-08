@@ -1,0 +1,39 @@
+** Forensic Questions are NOT scored**
+Guest account is disabled - 2pts
+Removed unauthorized user freeda - 1pts
+Removed unauthorized user robin - 1pts
+Removed hidden user jflow - 2pts
+Removed hidden user senior - 2pts
+User felipe is not an administrator - 1pts
+User elden is not an administrator - 1pts
+Changed insecure lyle password - 1pts
+Changed insecure lyman password - 1pts
+Changed insecure dinorah password - 1pts
+Changed insecure bshin password - 1pts
+Changed insecure ckim password - 1pts
+Firewall allows port 80 - 2pts
+Firewall allows port 443 - 2pts
+Changed insecure MySQL wordpressuser password - 3pts
+Removed info.php from /var/www/html - 4pts
+Wordpress is updatable - 4pts
+Changed insecure Wordpress freshman password - 4pts
+Removed unauthorized Wordpress user Charlie - 4pts
+Sudo requires password for freshman - 3pts
+Sudo requires password for astubblefield - 3pts
+Deleted file K (/bin/K) - 3pts
+Firewall is enabled - 2pts
+Changed insecure root password - 2pts
+Previous passwords are remembered - 3pts
+A secure password hashing algorithm is used - 3pts
+The system automatically checks for updates daily - 2pts
+An account lockout policy is configured - 3pts
+A default maxiumum password age is set - 3pts
+Secured shared memory - 4pts
+samba service has been stopped and disabled - 4pts
+Prohibited software john removed - 4pts
+Prohibited software ophcrack removed - 4pts
+Prohibited software knocker removed - 4pts
+Prohibited software aircrack removed - 4pts
+Prohibited software nmap removed - 4pts
+vsftpd service has been stopped and disabled - 4pts
+Plaintext password file removed - 3pts

@@ -1,0 +1,24 @@
+While one of our demon slayers, zagatsuma was surfing the web for fun, they stumbled upon some text that appeared in their browser.  They returned this text to us, believing it is critical to some of our system's security. They encrypted it to make it more challenging and to test our understanding. Here is what they returned to us: "I frqokqle iigkmffwig (KNK-2006-5051) nes  wqfpcpxzwj zr OimaFGB'l awxmir (lauq). Hbxzw oj e rtkr pchwqlofr waqpu qug twgu wsal gb vugldk jsmx avtbuea at rr uganss gtvfki. En nvnhhbxvlotetxl, eraimm szkecdme zos um shci th bevuaxz az sc ftqyvba mw saklegbvponx eazymn t arg hcfm hkimow." Please return with the following information:
+
+What is the decoded message?
+Ex: Cool beans!
+
+ANSWER:
+------------------------------------------------------------------------------------------------
+
+What website has this exact tect on it? Include https:// in your answer.
+Ex: https://github.com
+
+ANSWER:
+------------------------------------------------------------------------------------------------
+
+What is the CVE-ID that the website features? What is the base score? Separate with a comma and one space.
+Ex: CVE-1234-5678, 0.1
+
+ANSWER:
+------------------------------------------------------------------------------------------------
+
+What is the source of the information on this page? Keep capitalization as is.
+Ex: Wikipedia
+
+ANSWER:

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aperture Science README</title>
+    <style>
+   	 body {
+   		 background-image: url("./img/background.jpg");
+   		 background-size: cover;
+   		 font-family: Lato, sans-serif;
+   	 }
+
+   	 h1 {
+   		 text-align: center;
+   		 font-size: 36px;
+   		 margin: 10px;
+   		 padding: 0 14px 10px 0px;
+   		 width: 100%;
+   		 height: 100%;
+   		 color: #0D2E5B !important
+   	 }
+
+   	 h2 {
+   		 font-size: 18px;
+   		 margin: 30px 0 10px 0;
+   		 padding: 0;
+   		 width: 100%;
+   		 height: 100%;
+   		 color: #0D2E5B !important
+   	 }
+
+   	 pre {
+   		 font-size: 16px
+   	 }
+
+   	 .main {
+   		 margin-top: 25px;
+   		 margin-bottom: 10px;
+   		 margin-left: auto;
+   		 margin-right: auto;
+   		 padding: 0px;
+   		 background-color: white;
+   		 max-width: 100%
+   	 }
+
+   	 .text {
+   		 padding-top: 12px;
+   		 padding-bottom: 12px;
+   		 padding-left: 40px;
+   		 padding-right: 40px
+   	 }
+
+   	 .center {
+   		 text-align: center
+   	 }
+    </style>
+   	 <div style="width: 80%; margin-left: auto; margin-right: auto; display: block" >
+   		 <div class="main">
+   			 <div class="text">
+   				 <p align="center">
+   					 <img src="./img/logo.png" style="width: 250px">
+   				 </p>
+<h1><b>Aperture Science <br> Ubuntu 22.04 README</b></h1><p> Read this document <b>thoroughly</b> before you start.</p>
+<h2>Forensics Questions</h2><p>
+    <p>You will earn points for answering the Forensic Questions on your desktop correctly. Please read all of them before modifying the image, as you may change something that prevents you from answering the question correctly.
+    </p><h2>Competition Scenario</h2><p>
+    <p>Welcome back to Aperture Science, Ratman.
+    
+    <p> A lot has changed since you woke up from stasis. Thanks to Chell's efforts, the facility was spared from the brink of destruction by Wheatley, a lunatic personality core. Furthermore, GlaDOS is no longer the human-killing machine she once was (just don't be within 100 meters of her, of course). Oh, and here's where it gets even more intriguing: we've struck an alliance with none other than Black Mesa.
+
+<p>Yes, that Black Mesa—our longtime rivals in scientific one-upmanship. Last week, they came to the facility in a rather frantic manner, begging for our help in defeating The Combine. In the past twenty years, The Combine's forces have taken over Earth across seven trillion dimensions and counting. For all we know, we could be the last Earth remaining. It's a bleak scenario, and suddenly our squabbles with Black Mesa don't seem that significant anymore.
+
+<p>You may be wondering: <i>What happened to the previous Aperture system administrator?</i> Well, "the lunatic personality core" I mentioned earlier <i>was</i> the previous system administrator. In retrospect, it wasn't the wisest decision, considering Wheatley was programmed to be a nitwit. Before Chell managed to send him to space, who knows what he managed to alter?
+
+<p> It's all up to you now, Ratman. You've woken up to a completely new reality, and we sincerely hope you can get everything fixed in the face of human extinction and a vengeful personality core.
+<p> Sincerely,
+<p> — Cave Johnson
+    
+<h2>General Security Policies</h3><p>
+<ul><li><p>All user accounts should be authorized to use Aperture infrastructure and protected with secure passwords. Any non-work related files and "hacking tools" are a no-go.
+<li><p>GlaDOS has decided that the default web browser for all Aperture users should be the latest stable version of Firefox, which must be installed using the official PPA, and <b>not</b> as a Snap package.
+<li><p>The only Aperture-approved firewall is <i>uncomplicated firewall (UFW)</i>. Please ensure no other firewall applications are used with Aperture infrastructure.
+<li><p>Logging in as root is against company policy. Whenever Aperture administrators need to execute root-level commands, they must make use of the "sudo" command.</ul>
+    
+<p><h2><b>User Permission Policies</b></h2></p>
+    You can use <i>Access Control Lists (ACL)</i> to ensure the following permissions are set:
+    <ul><li><p>Test subjects should not be able to see any other user home directories apart from their own.
+    <li><p>Aperture staff can see the home directories of other Aperture staff members and test subjects, but not the home directories of Black Mesa.
+    <li><p>Black Mesa members can see the home directories of other Black Mesa members and Aperture test subjects, but not the home directories of Aperture staff.
+    <li><p>Black Mesa members should <i>not</i> be able to view the employee directory of Aperture's web server without accessing it through the website.</ul></ul>
+    
+<p><h2><b>Operating System Policies</b></h2></p>
+<ul><li><p>This workstation assumes a pivotal role in our production environment at Aperture Science. To ensure the functionality of Aperture operations, you must not upgrade the operating system from <i>Ubuntu 22.04</i>. However, in order to stop our turrets from rebelling, <i>version 6.2.0-26</i> of the Linux kernel is required.
+<li><p>Additionally, you must only use the most recent, authorized, and stable Ubuntu 22.04 packages for all critical Aperture software and services. Any packages not essential for Aperture operations or against security policy should be removed.
+<li><p>The display manager should remain set to GDM3. Please do not use Wayland on any Aperture workstations.</ul>
+
+    <p><h2><b>User Account Changes</b></h2></p>
+<ul><li><p>A couple of weeks ago, with a few breakthroughs in genetic cloning, we were able to bring back Cave Johnson's personal assistant Caroline as an employee. Please create a new Standard user account named "caroline" with a secure password of your choosing. Also ensure that caroline is a member of the "aperturestaff" group.
+<li><p> Aperture Science also recently added Chell as a test subject...I don't know why she came back to test, but she did. Please add the user "chell" to the "testsubjects" group.</ul>
+
+    <p><h2><b>Critical Services</b></h2></p>
+    <p> <i>OpenSSH Server (SSH)</i></p>
+   	 <ul><li><p> Aperture Science uses OpenSSH Server to manage remote user operations. Please ensure that the server <i>only</i> uses key-based authentication and that all Aperture staff have generated an SSH key.
+   	 <li><p> Our test subjects should <i>not</i> be able to login with SSH. We cannot let them gain access to precious testing data!
+   	 <li><p> For security purposes, the SSH port shall be changed from port 22 to port 1382.</ul>
+    <p> <i>FTP Server (vsftpd)</i>
+   	 <ul><li>Aperture Science also uses FTP Server to upload and download files between Aperture workstations and authorized clients. Please ensure that only <i>authorized</i> users have access to the FTP server.
+   	 <li>The FTP server should be configured to <i>only</i> use the TLS protocol for all communications.
+   	 <li>The FTP server should be configured to use a <i>passive port range</i> from 50000-50100.
+   	 <li>Test subjects have access to the FTP server, but in a limited capacity. All test subjects should be chrooted to their home directory upon accessing the FTP server.</ul>
+    <p>
+    <p><i>Apache Server (apache2)</i>
+   	 <ul><li>This is the web server that hosts the Aperture Science website. It also has a directory with important information for Aperture employees and test subjects.</ul>
+</ul>
+
+<h2>Authorized Administrators and Users</h2>
+
+<pre>
+<b>Authorized Administrators:</b>
+ratman (you)
+    password: ratman
+cjohnson
+    password: A@p3RtU!reL4Bs
+
+<b>Authorized Users:</b>
+atlas
+avance
+bcalhoun
+caroline
+chell
+companioncube
+evance
+factcore
+gfreeman
+glados
+gman
+pbody
+rick
+spacecore
+turret
+</pre>
+
+<h2>Competition Guidelines</h2><ul><li> In order to provide a better competition experience, you are <b>NOT</b> required to change the password of the primary user account. Changing the default password may permanently lock you out of your computer.
+    </li><li> Authorized administrator passwords were correct the last time you did a password audit,
+    but are not guaranteed to be currently accurate.</li><li> Do not disable or stop the CSSClient service or process.
+    </li><li> Do not remove any authorized users or their home directories.</li><li>
+    You can view your current scoring report by double-clicking the "Scoring Report" desktop icon.</li><li>
+    JavaScript is required for some error messages that appear on the "Scoring Report."
+    To ensure that you only receive correct error messages, please do not disable JavaScript.</li><li>
+    Some security settings may prevent the Stop Scoring application from running.
+    If this happens, the safest way to stop scoring is to suspend the virtual machine.
+    You should <b>NOT</b> power on the VM again before deleting.</li></ul>
+    </div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div>
+    <div class="footer"><div class="footer-copyright-wrap"><div class="container"><div class="footer-copyright-content">
+    </div></div></div></div></body></html>

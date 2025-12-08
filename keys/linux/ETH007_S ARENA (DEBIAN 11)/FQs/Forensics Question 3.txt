@@ -1,0 +1,27 @@
+This is a Forensics Question. Answer it below.
+
+EXAMPLE QUESTION: What is 40 + 2?
+EXAMPLE ANSWER: 42
+-----------------------------------------------
+
+On another system, we have identified pieces of malware that potentially could be harmful.
+
+We have found the following assembly code sequence as part of the malware. We do not have any information about the initial state of the registers.
+
+xor rdi, rdi
+add rdi, 0x50bf536
+xor rsi, rsi
+add rsi, 0xa2a7674
+xor rdx, rdx
+add rdx, 0x2f39575
+shl rdx, 3
+shl rsi, 2
+shl rdi, 5
+xor rdx, rsi
+xor rdx, rdi
+mov rax, rdx
+
+What is the value of the "rax" register after this program runs? Give your answer in decimal (base-10) form.
+
+EXAMPLE: 89382904
+ANSWER: 

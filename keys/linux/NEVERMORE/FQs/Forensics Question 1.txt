@@ -1,0 +1,22 @@
+FORENSICS QUESTION 1
+=====================
+
+A systems security plan is a comprehensive document outlining the organizational and technical measures, policies, and procedures designed to safeguard the confidentiality, integrity, and availability of an information system and its data.
+
+We would like to write a systems security plan for the Seafile instance, however we do not have all the information we need. Could you document the following?
+
+The port on which the Seahub frontend is accessible via browser 
+EX: 80
+ANSWER:
+
+The systemd unit(s) used to start and stop the Seafile and Seahub instances (HINT: There may more than one answer)
+EX: sshd.service
+ANSWER:
+
+The MariaDB database(s) in use by the Seafile and Seahub instances (HINT: There may more than one answer)
+EX: sys
+ANSWER:
+
+The amount of storage used by the Seafile server as of right now, in Kilobytes, rounded to the first decimal place. 
+EX: 43.2
+ANSWER: 

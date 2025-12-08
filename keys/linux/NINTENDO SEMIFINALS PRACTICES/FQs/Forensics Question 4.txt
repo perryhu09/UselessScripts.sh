@@ -1,0 +1,5 @@
+FORENSICS QUESTION 4
+=====================
+
+Team Rocket grouped up with the evil wizards and really wanted to destroy all functionalities of the system, even causing disruptions to the firewall. Nintendo HQ also reported issues with not being able to edit anything in /etc. What is the sha256sum of the file causing these issues?
+ANSWER: 

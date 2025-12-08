@@ -1,0 +1,5 @@
+FORENSICS QUESTION 3
+
+Where is the Samba intelligence report file share located on the system?
+
+ANSWER: 

@@ -1,0 +1,3 @@
+Fred seems to have installed a web browser addon that's making regular HTTP 
+POST requests. What is the hostname and port that it's making the requests to?
+ANSWER:

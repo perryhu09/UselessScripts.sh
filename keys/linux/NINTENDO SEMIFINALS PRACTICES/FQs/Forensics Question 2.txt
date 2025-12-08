@@ -1,0 +1,14 @@
+FORENSICS QUESTION 2
+=====================
+
+Nintendo HQ reported there were several backdoors still left in the system but they couldn't directly identify what they are doing. Please identify these parts of the backdoor that seemed to occur when a user logs into their account. 
+EX: 127.0.0.1
+ANSWER: 
+
+The port:
+EX: 1234
+ANSWER: 
+
+The binary used:
+EX: perl, bash, sh
+ANSWER: 

@@ -1,0 +1,23 @@
+This is a Forensics Question. Answer it below.
+
+EXAMPLE QUESTION: What is 40 + 2?
+EXAMPLE ANSWER: 42
+-----------------------------------------------
+
+This server is authorized by Headquarters to act as a mail server. Each user is configured to have an inbox, and can log into the webmail service to check their emails. 
+
+The user "joy@mail.inside.out" has logged into the webmail service in the past, and has drafted up an email. There is one email that joy has written but has not sent yet.
+
+-----------------------------------------------
+
+What is the email address of the user that joy is sending the email to?
+
+EXAMPLE: disgust@mail.inside.out
+ANSWER: 
+
+-----------------------------------------------
+
+What is the MD5 hash (all lowercase) of the image attachment on the email?
+
+EXAMPLE: e62aa8263752f4f16e0cadf035680e5c
+ANSWER: 

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>README</title>
+	<style>
+		body {
+			background-image: url("./img/background.png");
+			background-size: cover;
+			font-family: Helvetica, Arial, sans-serif;
+		}
+
+		h1 {
+			text-align: center;
+			font-size: 36px;
+			margin: 10px;
+			padding: 0 14px 10px 0px;
+			width: 100%;
+			height: 100%;
+			color: #0D2E5B !important
+		}
+
+		h2 {
+			font-size: 18px;
+			margin: 30px 0 10px 0;
+			padding: 0;
+			width: 100%;
+			height: 100%;
+			color: #0D2E5B !important
+		}
+
+		pre {
+			font-size: 16px;
+			font-family: Consolas;
+			white-space: pre-line;
+			border: 1px solid #666;
+			padding: 15px;
+			margin-top: 0.2rem;
+			margin-bottom: 0.2rem;
+			white-space: pre-line;
+			display: inline-block;
+		}
+
+		.main {
+			margin-top: 25px;
+			margin-bottom: 10px;
+			margin-left: auto;
+			margin-right: auto;
+			padding: 0px;
+			background-color: rgba(255,255,255,0.75);
+			max-width: 100%
+		}
+
+		.text {
+			padding-top: 12px;
+			padding-bottom: 12px;
+			padding-left: 40px;
+			padding-right: 40px
+		}
+
+		.center {
+			text-align: center
+		}
+	</style>
+		<div style="width: 80%; margin-left: auto; margin-right: auto; display: block" >
+			<div class="main">
+				<div class="text">
+					<p align="center">
+						<img src="./img/logo.png" width="180px">
+					</p>
+<h1><b>Debian 10 Critical Service Chaos README</b></h1><h2><b>Debian 10</b></h2><!-- remove the "_" prefix from this file name to replace the default company policy text -->
+<!-- check out web.go for the default company policy -->
+<p>
+	This system is operated by the Bear Cybercommand and runs most of the unit's server operations. Bear Cybercommand has a limited budget due to most of the unit's budget being reallocated to combat operations in the ongoing bear-penguin war, so as a cost saving measure the unit has migrated all of their server operations into this single system. Paular Bear is the Cybercommand member responsible for the administration of this system and has noticed that the system has been compromised by enemy penguin forces. He has asked you for assistance in securing the services across the system and purging the enemy presence in the system.
+</p>
+
+<p>
+	This system runs both the NGINX and Apache webservers and should only have sites setup to read from the <code>/var/www/html</code> directory. The OpenSSH server is used for remote access and a Samba server is running for the sharing of bear intelligence reports to authorized personnel. Make sure all other Samba shares are removed. There also exists a PostgreSQL database server running that should be secured
+</p>
+
+<p>
+	Paular Bear has asked that you setup the UFW firewall on the system with rules to allow traffic to the critical services on the system. He has also asked that all traces of penguins and non-work related media and applications to be erased from the system.
+</p>
+
+<p>
+	In addition to assisting Paular Bear with the security of this system, you have been assigned forensics tasks by the Bear Intelligence Agency to aid them in the investigation of the penguin breach. These tasks can be found on your desktop.
+</p>
+
+<!-- Put your critical services here! -->
+<p><b>Critical Services:</b></p>
+<ul>
+	<li>OpenSSH Server (sshd)</li>
+	<li>NGINX Webserver (nginx) [ports 8080 and 4443]</li>
+	<li>Apache Webserver (apache2) [ports 80 and 443]</li>
+	<li>Samba Server (smbd)</li>
+	<li>PostgreSQL (postgresql)</li>
+</ul>
+
+<!-- Put your users here! -->
+<h2>Authorized Administrators and Users</h2>
+
+<pre>
+<b>Authorized Administrators:</b>
+admin-bear (you)
+	password: ^qpwp4Wr
+paular-bear
+	password: V^!@&P@to7Jz
+</pre>
+<h2>Competition Guidelines</h2>
+<ul>
+<li> In order to provide a better competition experience, you are <b>NOT</b> required to change the password of the primary, auto-login, user account. Changing the password of a user that is set to automatically log in may lock you out of your computer.</li>
+<li> Authorized administrator passwords were correct the last time you did a password audit,
+but are not guaranteed to be currently accurate.</li>
+<li> Do not disable or stop the CSSClient service or process. </li>
+<li> Do not remove any authorized users or their home directories.</li><li>
+The time zone of this image is set to UTC. Please do not change the time zone, date, or time on this image.</li><li> You can view your current scoring report by double-clicking the "Scoring Report" desktop icon.</li>
+<li> JavaScript is required for some error messages that appear on the "Scoring Report." To ensure that you only receive correct error messages, please do not disable JavaScript.</li>
+<li> Some security settings may prevent the Stop Scoring application from running. If this happens, the safest way to stop scoring is to suspend the virtual machine. You should <b>NOT</b> power on the VM again before deleting.</li>
+</ul>
+<p align="center" style="text-align:center"> The Aeacus Project is in no way affiliated or endorsed by the Air Force Association or the University of Texas at San Antonio.</p>
+</div></div></div></div></div></div></div></div></div></div></div></div></div></div></div></div>
+<div class="footer"><div class="footer-copyright-wrap"><div class="container"><div class="footer-copyright-content">
+<ul>
+	<li>Copyright Never &copy;</li>
+	<li>No rights reserved</li>
+</ul>
+</div></div></div></div></body></html>

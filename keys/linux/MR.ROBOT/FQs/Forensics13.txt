@@ -1,0 +1,3 @@
+Fred has somehow managed to retain sudo access without being in the sudoers 
+file. What is the full path of the file allowing Fred to retain sudo access?
+ANSWER:

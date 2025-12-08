@@ -22,6 +22,7 @@ if [ -n "$SUDO_USER" ]; then
 else
   ACTUAL_USER_HOME="$HOME"
 fi
+
 LOG_FILE="$ACTUAL_USER_HOME/Desktop/hardening.log"
 
 # Logging Function
@@ -39,6 +40,7 @@ backup_file() {
     log_action "Backed up $1"
   fi
 }
+
 #===============================================
 # Pre-Flight Checklist
 #===============================================
@@ -83,26 +85,97 @@ preflight_check() {
 
 enable_security_updates() {
     log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
-    # Fix commented-out security lines
-    sudo sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
+    sed -i 's/^#\(.*-security.*\)/\1/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null
 
-    # If security repo is missing, add it based on current codename
     CODENAME="$(lsb_release -sc)"
     if ! grep -Rq "${CODENAME}-security" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
-        echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list >/dev/null
+        echo "deb http://archive.ubuntu.com/ubuntu ${CODENAME}-security main restricted universe multiverse" | tee -a /etc/apt/sources.list >/dev/null
         log_action "Added missing security repo for ${CODENAME}"
     fi
     
     log_action "Security update repos ensured"
 }
 
-enable_auto_update_refresh() {
-    log_action "=== ENABLING AUTOMATIC UPDATE REFRESH ==="
+configure_automatic_updates() {
+  log_action "=== CONFIGURING AUTOMATIC UPDATES ==="
 
-    sudo systemctl enable --now apt-daily.timer &>/dev/null
-    sudo systemctl enable --now apt-daily-upgrade.timer &>/dev/null
+  DEBIAN_FRONTEND=noninteractive apt-get update -y -qq &>/dev/null
 
-    log_action "Automatic update refresh enabled"
+  # Install unattended updates
+  if ! dpkg -l | grep -q unattended-upgrades; then
+    apt install -y unattended-upgrades apt-listchanges &>/dev/null
+    log_action "Installed unattended-upgrades"
+  fi
+
+  # Enable automatic updates
+  echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections &>/dev/null
+  dpkg-reconfigure -f noninteractive unattended-upgrades &>/dev/null
+  log_action "Enabled unattended-upgrades"
+
+  backup_file /etc/apt/apt.conf.d/20auto-upgrades
+
+  cat >/etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";
+APT::Periodic::Unattended-Upgrade "1";
+EOF
+  log_action "Configured daily automatic updates"
+
+  # clean up policy
+  local unattended_conf="/etc/apt/apt.conf.d/50unattended-upgrades"
+  touch "$unattended_conf"
+  grep -q "Remove-Unused-Kernel-Packages" "$unattended_conf" || echo 'Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";' >> "$unattended_conf"
+  grep -q "Remove-Unused-Dependencies" "$unattended_conf" || echo 'Unattended-Upgrade::Remove-Unused-Dependencies "true";' >> "$unattended_conf"
+  log_action "Configured automatic cleanup policy"
+  
+  systemctl enable apt-daily.timer &>/dev/null
+  systemctl start apt-daily.timer &>/dev/null
+  systemctl enable apt-daily-upgrade.timer &>/dev/null
+  systemctl start apt-daily-upgrade.timer &>/dev/null
+
+  if systemctl is-active --quiet apt-daily.timer && systemctl is-active --quiet apt-daily-upgrade.timer; then
+    log_action "APT update timers active"
+  else
+    log_action "WARNING: APT timers may not be active"
+  fi
+  
+  # clear package holds
+  local held=$(apt-mark showhold 2>/dev/null)
+  if [[ -n "$held" ]]; then
+    while IFS=read -r pkg; do
+      [[ -n "$pkg" ]] && apt-mark unhold "$pkg" &>/dev/null
+    done <<< "$held"
+    log_action "Cleared package holds"
+  fi
+
+  # create systemd timer to update flatpak apps daily
+  if command -v flatpak &>/dev/null; then
+    cat >/etc/systemd/system/cp-flatpak-update.service << 'EOF'
+[Unit]
+Description=CyberPatriot Flatpak Auto-Update
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update -y --noninteractive
+EOF
+
+    cat >/etc/systemd/system/cp-flatpak-update.timer << 'EOF'
+[Unit]
+Description=Daily Flatpak updates
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload &>/dev/null
+    systemctl enable --now cp-flatpak-update.timer &>/dev/null
+    log_action "Flatpak auto-update timer enabled"
+  fi
 }
 
 update_system() {
@@ -135,33 +208,46 @@ update_system() {
 
   apt autoclean -y -qq &>/dev/null
   log_action "Cleaned package cache"
-}
 
-configure_automatic_updates() {
-  log_action "=== CONFIGURING AUTOMATIC UPDATES ==="
-
-  # Install unattended updates
-  if ! dpkg -l | grep -q unattended-upgrades; then
-    apt install -y unattended-upgrades apt-listchanges &>/dev/null
-    log_action "Installed unattended-upgrades"
+  if [[ -f /var/run/reboot-required ]]; then
+    log_action "*** REBOOT REQUIRED to complete updates"
   fi
 
-  # Enable automatic updates
-  echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections &>/dev/null
-  dpkg-reconfigure -f noninteractive unattended-upgrades &>/dev/null
-  log_action "Enabled unattended-upgrades"
-
-  backup_file /etc/apt/apt.conf.d/20auto-upgrades
-
-  cat >/etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Download-Upgradeable-Packages "1";
-APT::Periodic::AutocleanInterval "7";
-APT::Periodic::Unattended-Upgrade "1";
-EOF
-  log_action "Configured daily automatic updates"
+  local remaining=$(apt-get -s upgrade 2>/dev/null | grep -c "^Inst" || echo "0")
+  log_action "Remaining upgradeable packages: $remaining"
 }
 
+install_security_dependencies() {
+  log_action "=== INSTALLING REQUIRED SECURITY TOOLS ==="
+
+  local packages=(curl jq debsums) # TODO: ADD MORE
+  local missing=()
+
+  for pkg in "${packages[@]}"; do
+    if ! command -v "$pkg" &>/dev/null; then
+      missing+=("$pkg")
+    fi
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    log_action "All required security tools already installed"
+    return 0
+  fi
+
+  log_action "Installing missing packages: ${missing[*]}"
+  
+  if ! apt-get update -qq 2>/dev/null; then
+    log_action "WARNING: apt-get update failed, attempting installation anyway"
+  fi
+
+  for pkg in "${missing[@]}"; do
+    if apt-get install -y "$pkg" >/dev/null 2>&1; then
+      log_action "✓ Installed $pkg"
+    else
+      log_action "⚠ WARNING: Failed to install $pkg"
+    fi
+  done
+}
 #===============================================
 # Users && Groups
 #===============================================
@@ -206,7 +292,7 @@ fix_admin_group() {
   for user in $SUDO_MEMBERS; do
     if [[ ! "${ADMIN_USERS[@]}" =~ "${user}" ]]; then
       log_action "Removing $user from sudo group"
-      sudo deluser "$user" sudo &>/dev/null
+      deluser "$user" sudo &>/dev/null
     fi
   done
 
@@ -215,7 +301,7 @@ fix_admin_group() {
     for user in $ADMIN_MEMBERS; do
       if [[ ! "${ADMIN_USERS[@]}" =~ "${user}" ]]; then
         log_action "Removing $user from admin group"
-        sudo deluser "$user" admin &>/dev/null
+        deluser "$user" admin &>/dev/null
       fi
     done
   fi
@@ -244,20 +330,73 @@ check_uid_zero() {
   fi
 }
 
+check_group_sudo_privileges() {
+  log_action "=== CHECKING GROUP SUDO PRIVILEGES ==="
+
+  log_action "Checking for groups with sudo privileges..."
+
+  local issues_found=0
+
+  if getent group sudo >/dev/null 2>&1; then
+    local sudo_members
+    sudo_members=$(getent group sudo | cut -d: -f4)
+    if [[ -n "$sudo_members" ]]; then
+      log_action "Sudo group members: $sudo_members"
+      log_action "This is expected - individual users should be in sudo group, not other groups"
+    fi
+  fi
+
+  if [[ -f /etc/sudoers ]]; then
+    while IFS= read -r line; do
+      if [[ -n "$line" ]]; then
+        local groupname
+        groupname=$(echo "$line" | sed 's/^%\([^ ]*\).*/\1/')
+        
+        if [[ "$groupname" != "sudo" && "$groupname" != "admin" ]]; then
+          log_action "WARNING: Group $groupname has sudo privileges in /etc/sudoers"
+          log_action "Disabling sudo privileges for group: $groupname"
+          sed -i "s/^\(%$groupname.*\)$/# DISABLED BY SECURITY POLICY: \1/" /etc/sudoers
+          issues_found=$((issues_found + 1))
+        fi
+      fi
+    done < <(grep -E "^%[^#]" /etc/sudoers 2>/dev/null | grep -v "^%sudo" | grep -v "^%admin")
+  fi
+
+  if [[ -d /etc/sudoers.d ]]; then
+    while IFS= read -r file; do
+      while IFS= read -r line; do
+        if [[ -n "$line" ]]; then
+          local groupname
+          groupname=$(echo "$line" | sed 's/^%\([^ ]*\).*/\1/')
+          if [[ "$groupname" != "sudo" && "$groupname" != "admin" ]]; then
+            log_action "WARNING: Group $groupname has sudo privileges in $file"
+            log_action "Disabling sudo privileges for group: $groupname in $file"
+            sed -i "s/^\(%$groupname.*\)$/# DISABLED BY SECURITY POLICY: \1/" "$file"
+            issues_found=$((issues_found + 1))
+          fi
+        fi
+      done < <(grep -E "^%[^#]" "$file" 2>/dev/null | grep -v "^%sudo" | grep -v "^%admin")
+    done < <(find /etc/sudoers.d -type f)
+  fi
+
+  if [[ $issues_found -eq 0 ]]; then
+    log_action "No unauthorized groups have sudo privileges"
+  else
+    log_action "Removed sudo privileges from $issues_found unauthorized group(s)"
+  fi
+}
+
 disable_guest() {
   log_action "=== DISABLING GUEST ACCOUNT ==="
 
-  # LightDM (Common in Linux Mint Xfce, MATE editions)
+  # LightDM 
   if [ -f /etc/lightdm/lightdm.conf ]; then
     backup_file /etc/lightdm/lightdm.conf
 
-    # Check if [Seat:*] section exists
     if grep -q "^\[Seat:\*\]" /etc/lightdm/lightdm.conf; then
-      # Remove any existing allow-guest lines and add after [Seat:*]
       sed -i '/^[#[:space:]]*allow-guest=/d' /etc/lightdm/lightdm.conf
       sed -i '/^\[Seat:\*\]/a allow-guest=false' /etc/lightdm/lightdm.conf
     else
-      # Add [Seat:*] section with allow-guest=false
       echo -e "\n[Seat:*]\nallow-guest=false" >> /etc/lightdm/lightdm.conf
     fi
     log_action "Disabled guest account in lightdm.conf"
@@ -273,7 +412,7 @@ disable_guest() {
   # Update dconf database
   if command -v dconf &>/dev/null; then
     dconf update 2>/dev/null
-    log_action "Updated Cinnamon dconf settings to harden guest access"
+    log_action "Updated dconf configuration database"
   fi
 
   # GDM3 Display Manager (if used in some Mint configurations)
@@ -335,6 +474,7 @@ lock_root_account() {
   log_action "=== LOCKING ROOT ACCOUNT ==="
   if id root &>/dev/null; then
     if passwd -l root &>/dev/null; then
+      usermod -s /usr/sbin/nologin root
       log_action "Root password locked successfully."
     else
       log_action "ERROR: Failed to lock root password."
@@ -378,6 +518,75 @@ configure_pam() {
   sed -i '/pam_pwhistory.so/d' /etc/pam.d/common-password &>/dev/null
   sed -i '/pam_unix.so/a password requisite pam_pwhistory.so remember=5 enforce_for_root use_authtok' /etc/pam.d/common-password &>/dev/null
   log_action "Configured password history (remember=5)"
+}
+
+configure_account_lockout() {
+    log_action "=== CONFIGURING ACCOUNT LOCKOUT POLICY ==="
+
+    if ! find /lib* /usr/lib* -name "pam_faillock.so" 2>/dev/null | grep -q .; then
+        log_action "WARNING: pam_faillock.so not found, skipping lockout config"
+        return 1
+    fi
+
+    # Create pam-config profile: faillock_notify (runs BEFORE authentication)
+    cat >/usr/share/pam-configs/faillock_notify <<'EOF'
+Name: Notify on account lockout
+Default: no
+Priority: 1024
+Auth-Type: Primary
+Auth:
+    requisite                       pam_faillock.so preauth
+EOF
+    log_action "Created faillock_notify profile"
+
+    # Create pam-config profile: faillock (runs AFTER failed auth)
+    cat >/usr/share/pam-configs/faillock <<'EOF'
+Name: Lockout on failed logins
+Default: no
+Priority: 0
+Auth-Type: Primary
+Auth:
+    [default=die]                   pam_faillock.so authfail
+EOF
+    log_action "Created faillock profile"
+
+    # Create pam-config profile: faillock_reset (runs AFTER successful auth)
+    cat >/usr/share/pam-configs/faillock_reset <<'EOF'
+Name: Reset lockout on success
+Default: no
+Priority: 0
+Auth-Type: Additional
+Auth:
+    required                        pam_faillock.so authsucc
+EOF
+    log_action "Created faillock_reset profile"
+
+    if pam-auth-update --enable faillock faillock_reset faillock_notify --force 2>/dev/null; then
+        log_action "Enabled faillock profiles via pam-auth-update"
+    else
+        log_action "ERROR: pam-auth-update failed"
+        return 1
+    fi
+
+    backup_file /etc/security/faillock.conf
+    cat >/etc/security/faillock.conf <<'EOF'
+# Account Lockout Configuration
+
+# Lock account after 5 failed attempts
+deny = 5
+
+# Unlock after 15 minutes (900 seconds)
+unlock_time = 900
+
+# Count failures within 15 minute window
+fail_interval = 900
+
+# Also lock root account on failed attempts
+even_deny_root
+EOF
+    log_action "Configured /etc/security/faillock.conf"
+
+    log_action "Account lockout policy configured (lock after 5 failures, unlock after 15 min)"
 }
 
 set_password_aging() {
@@ -428,52 +637,629 @@ set_password_aging() {
 secure_file_permissions() {
   log_action "=== SECURING FILE PERMISSIONS ==="
 
-  # Password & Authentication Files
-  [ -f /etc/passwd ] && chmod 644 /etc/passwd && chown root:root /etc/passwd &>/dev/null
-  [ -f /etc/shadow ] && chmod 640 /etc/shadow && chown root:shadow /etc/shadow &>/dev/null
-  [ -f /etc/group ] && chmod 644 /etc/group && chown root:root /etc/group &>/dev/null
-  [ -f /etc/gshadow ] && chmod 640 /etc/gshadow && chown root:shadow /etc/gshadow &>/dev/null
-  [ -f /etc/security/opasswd ] && chmod 600 /etc/security/opasswd && chown root:root /etc/security/opasswd &>/dev/null
+  local fixed_count=0
+  local total_checks=0
 
-  log_action "Secured password/auth files"
+  # ================================
+  # AUTHENTICATION & PASSWORD FILES
+  # ================================
+  
+  if [[ -f /etc/passwd ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/passwd &>/dev/null && chown root:root /etc/passwd &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
 
-  # Boot files (GRUB)
-  for grub_cfg in /boot/grub/grub.cfg /boot/grub/grub.conf /boot/grub2/grub.cfg; do
-    if [ -f "$grub_cfg" ]; then
-      chmod 600 "$grub_cfg" &>/dev/null
-      chown root:root "$grub_cfg" &>/dev/null
-      log_action "Secured $grub_cfg"
+  if [[ -f /etc/shadow ]]; then
+    total_checks=$((total_checks + 1))
+    if ! getent group shadow &>/dev/null; then
+      groupadd shadow &>/dev/null
+    fi
+    chmod 640 /etc/shadow &>/dev/null && chown root:shadow /etc/shadow &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -f /etc/group ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/group &>/dev/null && chown root:root /etc/group &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -f /etc/gshadow ]]; then
+    total_checks=$((total_checks + 1))
+    if ! getent group shadow &>/dev/null; then
+      groupadd shadow &>/dev/null
+    fi
+    chmod 640 /etc/gshadow &>/dev/null && chown root:shadow /etc/gshadow &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -f /etc/security/opasswd ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 600 /etc/security/opasswd &>/dev/null && chown root:root /etc/security/opasswd &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  log_action "Secured password/authentication files ($fixed_count/$total_checks)"
+
+  # ================================
+  # SUDOERS CONFIGURATION
+  # ================================
+
+  if [[ -f /etc/sudoers ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 440 /etc/sudoers &>/dev/null && chown root:root /etc/sudoers &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -d /etc/sudoers.d ]]; then
+    chmod 750 /etc/sudoers.d &>/dev/null && chown root:root /etc/sudoers.d &>/dev/null
+    while IFS= read -r -d '' file; do
+      total_checks=$((total_checks + 1))
+      chmod 440 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    done < <(find /etc/sudoers.d -type f -print0 2>/dev/null)
+  fi
+
+  log_action "Secured sudoers configuration"
+
+  # ================================
+  # SSH CONFIGURATION & KEYS
+  # ================================
+
+  if [[ -d /etc/ssh ]]; then
+    chmod 755 /etc/ssh &>/dev/null && chown root:root /etc/ssh &>/dev/null
+  fi
+
+  if [[ -f /etc/ssh/sshd_config ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 600 /etc/ssh/sshd_config &>/dev/null && chown root:root /etc/ssh/sshd_config &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -d /etc/ssh/sshd_config.d ]]; then
+    while IFS= read -r -d '' file; do
+      total_checks=$((total_checks + 1))
+      chmod 600 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    done < <(find /etc/ssh/sshd_config.d -type f -name "*.conf" -print0 2>/dev/null)
+  fi
+
+  # SSH host keys (private keys)
+  for key in /etc/ssh/ssh_host_*_key; do
+    if [[ -f "$key" ]]; then
+      total_checks=$((total_checks + 1))
+      chmod 600 "$key" &>/dev/null && chown root:root "$key" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
     fi
   done
 
-  # SSH Configuration
-  [ -f /etc/ssh/sshd_config ] && chmod 600 /etc/ssh/sshd_config &>/dev/null && chown root:root /etc/ssh/sshd_config
-  [ -d /etc/ssh ] && chmod 755 /etc/ssh && chown root:root /etc/ssh
-  log_action "Secured SSH configuration"
+  # SSH host keys (public keys)
+  for key in /etc/ssh/ssh_host_*_key.pub; do
+    if [[ -f "$key" ]]; then
+      total_checks=$((total_checks + 1))
+      chmod 644 "$key" &>/dev/null && chown root:root "$key" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    fi
+  done
 
-  # Sudoers
-  [ -f /etc/sudoers ] && chmod 440 /etc/sudoers && chown root:root /etc/sudoers
-  if [ -d /etc/sudoers.d ]; then
-    chmod 755 /etc/sudoers.d
-    find /etc/sudoers.d -type f -exec chmod 440 {} \; &>/dev/null
-    find /etc/sudoers.d -type f -exec chown root:root {} \; &>/dev/null
-    log_action "Secured /etc/sudoers and /etc/sudoers.d/*"
+  log_action "Secured SSH configuration and host keys"
+
+  # ================================
+  # GRUB BOOTLOADER FILES
+  # ================================
+
+  local grub_files=(
+    "/boot/grub/grub.cfg"
+    "/boot/grub2/grub.cfg"
+    "/boot/grub/grub.conf"
+    "/boot/efi/EFI/ubuntu/grub.cfg"
+    "/boot/efi/EFI/linuxmint/grub.cfg"
+    "/boot/efi/EFI/BOOT/grub.cfg"
+  )
+
+  for grub_file in "${grub_files[@]}"; do
+    if [[ -f "$grub_file" ]]; then
+      total_checks=$((total_checks + 1))
+      chmod 600 "$grub_file" &>/dev/null && chown root:root "$grub_file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    fi
+  done
+
+  if [[ -d /boot/grub ]]; then
+    chmod 755 /boot/grub &>/dev/null && chown root:root /boot/grub &>/dev/null
   fi
 
-  # Cron files
-  [ -f /etc/crontab ] && chmod 600 /etc/crontab && chown root:root /etc/crontab
-  [ -d /etc/cron.d ] && find /etc/cron.d -type f -exec chmod 600 {} \;
-  [ -d /var/spool/cron/crontabs ] && chmod 700 /var/spool/cron/crontabs
-  log_action "Secured cron configurations"
+  log_action "Secured GRUB bootloader files"
 
-  [ -d /root ] && chmod 700 /root && chown root:root /root
-  log_action "Secured /root directory"
+  # ================================
+  # CRON SYSTEM
+  # ================================
 
-  # SSL private keys
-  [ -d /etc/ssl/private ] && chmod 710 /etc/ssl/private && chown root:ssl-cert /etc/ssl/private
-  log_action "Secured SSL private key directory"
+  if [[ -f /etc/crontab ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 600 /etc/crontab &>/dev/null && chown root:root /etc/crontab &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
 
-  log_action "File perms hardening complete"
+  if [[ -d /etc/cron.d ]]; then
+    chmod 700 /etc/cron.d &>/dev/null && chown root:root /etc/cron.d &>/dev/null
+    while IFS= read -r -d '' file; do
+      total_checks=$((total_checks + 1))
+      chmod 600 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    done < <(find /etc/cron.d -type f -print0 2>/dev/null)
+  fi
+
+  # Cron time-based directories
+  for cron_dir in /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly; do
+    if [[ -d "$cron_dir" ]]; then
+      chmod 700 "$cron_dir" &>/dev/null && chown root:root "$cron_dir" &>/dev/null
+      while IFS= read -r -d '' file; do
+        total_checks=$((total_checks + 1))
+        chmod 700 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+        [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+      done < <(find "$cron_dir" -type f -print0 2>/dev/null)
+    fi
+  done
+
+  if [[ -d /var/spool/cron/crontabs ]]; then
+    chmod 700 /var/spool/cron/crontabs &>/dev/null
+    if getent group crontab &>/dev/null; then
+      chown root:crontab /var/spool/cron/crontabs &>/dev/null
+    else
+      chown root:root /var/spool/cron/crontabs &>/dev/null
+    fi
+  fi
+
+  # at and cron allow/deny files
+  for control_file in /etc/at.allow /etc/at.deny /etc/cron.allow /etc/cron.deny; do
+    if [[ -f "$control_file" ]]; then
+      total_checks=$((total_checks + 1))
+      chmod 600 "$control_file" &>/dev/null && chown root:root "$control_file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    fi
+  done
+
+  log_action "Secured cron system configuration"
+
+  # ================================
+  # LOGGING SYSTEM
+  # ================================
+
+  if [[ -d /var/log ]]; then
+    if ! getent group syslog &>/dev/null; then
+      groupadd syslog &>/dev/null
+    fi
+    chmod 750 /var/log &>/dev/null && chown root:syslog /var/log &>/dev/null
+  fi
+
+  local log_files=(
+    "/var/log/auth.log"
+    "/var/log/syslog"
+    "/var/log/messages"
+    "/var/log/secure"
+    "/var/log/kern.log"
+    "/var/log/daemon.log"
+    "/var/log/boot.log"
+  )
+
+  for log_file in "${log_files[@]}"; do
+    if [[ -f "$log_file" ]]; then
+      total_checks=$((total_checks + 1))
+      chmod 640 "$log_file" &>/dev/null
+      chown root:adm "$log_file" 2>/dev/null || chown root:syslog "$log_file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    fi
+  done
+
+  # Audit log directory
+  if [[ -d /var/log/audit ]]; then
+    chmod 750 /var/log/audit &>/dev/null && chown root:root /var/log/audit &>/dev/null
+  fi
+
+  if [[ -f /var/log/audit/audit.log ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 600 /var/log/audit/audit.log &>/dev/null && chown root:root /var/log/audit/audit.log &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  log_action "Secured logging system"
+
+  # ================================
+  # LOG ROTATION CONFIGURATION
+  # ================================
+
+  if [[ -f /etc/logrotate.conf ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/logrotate.conf &>/dev/null && chown root:root /etc/logrotate.conf &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -d /etc/logrotate.d ]]; then
+    chmod 755 /etc/logrotate.d &>/dev/null && chown root:root /etc/logrotate.d &>/dev/null
+    while IFS= read -r -d '' file; do
+      total_checks=$((total_checks + 1))
+      chmod 644 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    done < <(find /etc/logrotate.d -type f -print0 2>/dev/null)
+  fi
+
+  log_action "Secured log rotation configuration"
+
+  # ================================
+  # SECURITY & PAM DIRECTORIES
+  # ================================
+
+  if [[ -d /etc/security ]]; then
+    chmod 755 /etc/security &>/dev/null && chown root:root /etc/security &>/dev/null
+  fi
+
+  if [[ -d /etc/pam.d ]]; then
+    chmod 755 /etc/pam.d &>/dev/null && chown root:root /etc/pam.d &>/dev/null
+    while IFS= read -r -d '' file; do
+      total_checks=$((total_checks + 1))
+      chmod 644 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    done < <(find /etc/pam.d -type f -print0 2>/dev/null)
+  fi
+
+  log_action "Secured PAM and security directories"
+
+  # ================================
+  # APPARMOR CONFIGURATION
+  # ================================
+
+  if [[ -d /etc/apparmor.d ]]; then
+    chmod 755 /etc/apparmor.d &>/dev/null && chown root:root /etc/apparmor.d &>/dev/null
+    while IFS= read -r -d '' file; do
+      total_checks=$((total_checks + 1))
+      chmod 644 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    done < <(find /etc/apparmor.d -type f -print0 2>/dev/null)
+  fi
+
+  if [[ -d /etc/apparmor ]]; then
+    chmod 755 /etc/apparmor &>/dev/null && chown root:root /etc/apparmor &>/dev/null
+  fi
+
+  log_action "Secured AppArmor configuration"
+
+  # ================================
+  # FIREWALL CONFIGURATION
+  # ================================
+
+  if [[ -d /etc/ufw ]]; then
+    chmod 755 /etc/ufw &>/dev/null && chown root:root /etc/ufw &>/dev/null
+  fi
+
+  if [[ -f /etc/ufw/ufw.conf ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/ufw/ufw.conf &>/dev/null && chown root:root /etc/ufw/ufw.conf &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -f /etc/default/ufw ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/default/ufw &>/dev/null && chown root:root /etc/default/ufw &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  log_action "Secured firewall configuration"
+
+  # ================================
+  # SSL/TLS CERTIFICATES & KEYS
+  # ================================
+
+  if [[ -d /etc/ssl/private ]]; then
+    chmod 710 /etc/ssl/private &>/dev/null
+    if getent group ssl-cert &>/dev/null; then
+      chown root:ssl-cert /etc/ssl/private &>/dev/null
+    else
+      chown root:root /etc/ssl/private &>/dev/null
+    fi
+  fi
+
+  # Secure private SSL keys
+  for keydir in /etc/ssl/private /etc/letsencrypt/live /etc/letsencrypt/archive; do
+    if [[ -d "$keydir" ]]; then
+      while IFS= read -r -d '' key; do
+        total_checks=$((total_checks + 1))
+        chmod 600 "$key" &>/dev/null && chown root:root "$key" &>/dev/null
+        [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+      done < <(find "$keydir" -type f \( -name "*.key" -o -name "*-key.pem" -o -name "privkey*.pem" \) -print0 2>/dev/null)
+    fi
+  done
+
+  log_action "Secured SSL/TLS certificates and keys"
+
+  # ================================
+  # FTP SERVER DIRECTORIES
+  # ================================
+
+  for ftp_root in /srv/ftp /var/ftp; do
+    if [[ -d "$ftp_root" ]]; then
+      chmod 755 "$ftp_root" &>/dev/null
+      if getent group ftp &>/dev/null; then
+        chown root:ftp "$ftp_root" &>/dev/null
+      else
+        chown root:root "$ftp_root" &>/dev/null
+      fi
+    fi
+  done
+
+  log_action "Secured FTP directories"
+
+  # ================================
+  # ROOT HOME DIRECTORY
+  # ================================
+
+  if [[ -d /root ]]; then
+    chmod 700 /root &>/dev/null && chown root:root /root &>/dev/null
+  fi
+
+  if [[ -f /root/.ssh/authorized_keys ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 600 /root/.ssh/authorized_keys &>/dev/null && chown root:root /root/.ssh/authorized_keys &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  log_action "Secured root home directory"
+
+  # ================================
+  # SYSTEM BINARIES
+  # ================================
+
+  for bin_dir in /bin /sbin /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin; do
+    if [[ -d "$bin_dir" ]]; then
+      chmod 755 "$bin_dir" &>/dev/null && chown root:root "$bin_dir" &>/dev/null
+    fi
+  done
+
+  log_action "Secured system binary directories"
+
+  # ================================
+  # KERNEL & SYSTEM CONFIGURATION
+  # ================================
+
+  if [[ -f /etc/sysctl.conf ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/sysctl.conf &>/dev/null && chown root:root /etc/sysctl.conf &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -d /etc/sysctl.d ]]; then
+    chmod 755 /etc/sysctl.d &>/dev/null && chown root:root /etc/sysctl.d &>/dev/null
+    while IFS= read -r -d '' file; do
+      total_checks=$((total_checks + 1))
+      chmod 644 "$file" &>/dev/null && chown root:root "$file" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+    done < <(find /etc/sysctl.d -type f -name "*.conf" -print0 2>/dev/null)
+  fi
+
+  log_action "Secured kernel configuration files"
+
+  # ================================
+  # NETWORK CONFIGURATION
+  # ================================
+
+  if [[ -f /etc/hosts ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/hosts &>/dev/null && chown root:root /etc/hosts &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -f /etc/hosts.allow ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/hosts.allow &>/dev/null && chown root:root /etc/hosts.allow &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  if [[ -f /etc/hosts.deny ]]; then
+    total_checks=$((total_checks + 1))
+    chmod 644 /etc/hosts.deny &>/dev/null && chown root:root /etc/hosts.deny &>/dev/null
+    [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+  fi
+
+  log_action "Secured network configuration files"
+
+  # ================================
+  # FINAL SUMMARY
+  # ================================
+
+  log_action ""
+  log_action "File Permissions Hardening Complete:"
+  log_action "  Total checks performed: $total_checks"
+  log_action "  Files/directories secured: $fixed_count"
+  log_action ""
+}
+
+verify_critical_file_permissions() {
+  log_action "=== VERIFYING CRITICAL FILE PERMISSIONS ==="
+
+  local total_checks=0
+  local issues_found=0
+  local files_correct=0
+
+  # Define critical files with expected permissions
+  # Format: "path:permissions:owner:group"
+  local critical_files=(
+    "/etc/passwd:644:root:root"
+    "/etc/shadow:640:root:shadow"
+    "/etc/group:644:root:root"
+    "/etc/gshadow:640:root:shadow"
+    "/etc/security/opasswd:600:root:root"
+    "/etc/sudoers:440:root:root"
+    "/etc/ssh/sshd_config:600:root:root"
+    "/etc/crontab:600:root:root"
+    "/etc/at.allow:600:root:root"
+    "/etc/at.deny:600:root:root"
+    "/etc/cron.allow:600:root:root"
+    "/etc/cron.deny:600:root:root"
+    "/boot/grub/grub.cfg:600:root:root"
+    "/boot/grub2/grub.cfg:600:root:root"
+    "/var/log/auth.log:640:root:adm"
+    "/var/log/syslog:640:root:adm"
+    "/var/log/audit/audit.log:600:root:root"
+    "/etc/sysctl.conf:644:root:root"
+    "/etc/hosts:644:root:root"
+    "/etc/hosts.allow:644:root:root"
+    "/etc/hosts.deny:644:root:root"
+    "/etc/logrotate.conf:644:root:root"
+    "/etc/ufw/ufw.conf:644:root:root"
+    "/etc/default/ufw:644:root:root"
+  )
+
+  # SSH host keys (private)
+  for key in /etc/ssh/ssh_host_*_key; do
+    if [[ -f "$key" && ! "$key" =~ \.pub$ ]]; then
+      critical_files+=("$key:600:root:root")
+    fi
+  done
+
+  # SSH host keys (public)
+  for key in /etc/ssh/ssh_host_*_key.pub; do
+    if [[ -f "$key" ]]; then
+      critical_files+=("$key:644:root:root")
+    fi
+  done
+
+  log_action "Checking critical files..."
+  log_action ""
+
+  for entry in "${critical_files[@]}"; do
+    IFS=':' read -r file expected_perm expected_owner expected_group <<< "$entry"
+    
+    if [[ ! -f "$file" ]]; then
+      continue
+    fi
+
+    total_checks=$((total_checks + 1))
+    
+    local actual_perm=$(stat -c '%a' "$file" 2>/dev/null)
+    local actual_owner=$(stat -c '%U' "$file" 2>/dev/null)
+    local actual_group=$(stat -c '%G' "$file" 2>/dev/null)
+    
+    local file_correct=true
+    local issues=""
+
+    if [[ "$actual_perm" != "$expected_perm" ]]; then
+      file_correct=false
+      issues="${issues}perm:$actual_perm(exp:$expected_perm) "
+    fi
+
+    if [[ "$actual_owner" != "$expected_owner" ]]; then
+      file_correct=false
+      issues="${issues}owner:$actual_owner(exp:$expected_owner) "
+    fi
+
+    if [[ "$actual_group" != "$expected_group" ]]; then
+      # Allow alternative groups for log files
+      if [[ "$file" =~ /var/log/ && ("$actual_group" == "adm" || "$actual_group" == "syslog") ]]; then
+        :  # This is acceptable
+      else
+        file_correct=false
+        issues="${issues}group:$actual_group(exp:$expected_group) "
+      fi
+    fi
+
+    if [[ "$file_correct" == true ]]; then
+      log_action "$file ($actual_perm $actual_owner:$actual_group)"
+      files_correct=$((files_correct + 1))
+    else
+      log_action " $file - $issues"
+      issues_found=$((issues_found + 1))
+    fi
+  done
+
+  log_action ""
+  log_action "Checking critical directories..."
+  log_action ""
+
+  local critical_dirs=(
+    "/etc/ssh:755:root:root"
+    "/etc/sudoers.d:750:root:root"
+    "/etc/cron.d:700:root:root"
+    "/etc/cron.hourly:700:root:root"
+    "/etc/cron.daily:700:root:root"
+    "/etc/cron.weekly:700:root:root"
+    "/etc/cron.monthly:700:root:root"
+    "/var/spool/cron/crontabs:700:root:crontab"
+    "/var/log:750:root:syslog"
+    "/var/log/audit:750:root:root"
+    "/etc/security:755:root:root"
+    "/etc/pam.d:755:root:root"
+    "/etc/apparmor.d:755:root:root"
+    "/etc/logrotate.d:755:root:root"
+    "/root:700:root:root"
+    "/etc/ssl/private:710:root:ssl-cert"
+  )
+
+  for entry in "${critical_dirs[@]}"; do
+    IFS=':' read -r dir expected_perm expected_owner expected_group <<< "$entry"
+    
+    if [[ ! -d "$dir" ]]; then
+      continue
+    fi
+
+    total_checks=$((total_checks + 1))
+    
+    local actual_perm=$(stat -c '%a' "$dir" 2>/dev/null)
+    local actual_owner=$(stat -c '%U' "$dir" 2>/dev/null)
+    local actual_group=$(stat -c '%G' "$dir" 2>/dev/null)
+    
+    local dir_correct=true
+    local issues=""
+
+    if [[ "$actual_perm" != "$expected_perm" ]]; then
+      dir_correct=false
+      issues="${issues}perm:$actual_perm(exp:$expected_perm) "
+    fi
+
+    if [[ "$actual_owner" != "$expected_owner" ]]; then
+      dir_correct=false
+      issues="${issues}owner:$actual_owner(exp:$expected_owner) "
+    fi
+
+    if [[ "$actual_group" != "$expected_group" ]]; then
+      # Allow fallback to root:root for some directories
+      if [[ "$expected_group" == "ssl-cert" || "$expected_group" == "crontab" || "$expected_group" == "syslog" ]]; then
+        if [[ "$actual_group" == "root" ]]; then
+          :  # This is acceptable fallback
+        else
+          dir_correct=false
+          issues="${issues}group:$actual_group(exp:$expected_group) "
+        fi
+      else
+        dir_correct=false
+        issues="${issues}group:$actual_group(exp:$expected_group) "
+      fi
+    fi
+
+    if [[ "$dir_correct" == true ]]; then
+      log_action "$dir ($actual_perm $actual_owner:$actual_group)"
+      files_correct=$((files_correct + 1))
+    else
+      log_action "$dir - $issues"
+      issues_found=$((issues_found + 1))
+    fi
+  done
+
+  log_action ""
+  log_action "========================================="
+  log_action "Verification Summary:"
+  log_action "  Total checks: $total_checks"
+  log_action "  Correct: $files_correct"
+  log_action "  Issues found: $issues_found"
+  log_action "========================================="
+
+  if [[ $issues_found -eq 0 ]]; then
+    log_action "ALL CRITICAL FILE PERMISSIONS ARE SECURE"
+  else
+    log_action "WARNING: $issues_found permission issue(s) detected"
+    log_action "Run secure_file_permissions() to fix these issues"
+  fi
+  log_action ""
 }
 
 fix_sudoers_nopasswd() {
@@ -504,6 +1290,12 @@ fix_sudoers_nopasswd() {
     log_action "No NOPASSWD entries found in sudoers files"
   else
     log_action "Fixed $found_issues sudoers file(s) with NOPASSWD entries"
+  fi
+
+  if [[ -f /etc/sudoers ]]; then
+    grep -q "Defaults.*use_pty" /etc/sudoers || echo "Defaults use_pty" >> /etc/sudoers
+    grep -q 'Defaults.*logfile=' /etc/sudoers || echo 'Defaults logfile="/var/log/sudo.log"' >> /etc/sudoers
+    log_action "Added sudo PTY requirement and logging"
   fi
 }
 
@@ -725,62 +1517,219 @@ EOF
   log_action "Removed any malicious redirects or blocking entries"
 }
 
-# REQUIRES OpenSSH Server Service to be installed (should be by default)
 harden_ssh() {
   log_action "=== HARDENING SSH CONFIGURATION ==="
 
+  # Check if SSH is installed
+  if [ ! -f /etc/ssh/sshd_config ]; then
+    log_action "SSH not installed (no sshd_config found), skipping"
+    return 0
+  fi
+
   backup_file /etc/ssh/sshd_config
 
-  # Helper fn
+  # Helper function to set a config option
   set_ssh_config() {
     local setting="$1"
     local value="$2"
-    sed -i "/^#*${setting}/d" /etc/ssh/sshd_config
-    echo "${setting} ${value}" >>/etc/ssh/sshd_config
-    log_action "Set ${setting} ${value}"
+    # Remove any existing lines (commented or not) for this setting
+    sed -i "/^#*\s*${setting}\s/d" /etc/ssh/sshd_config
+    # Append the new setting
+    echo "${setting} ${value}" >> /etc/ssh/sshd_config
   }
 
-  set_ssh_config "Protocol" "2"
+  log_action "Configuring authentication settings..."
+
   set_ssh_config "PermitRootLogin" "no"
-  set_ssh_config "PasswordAuthentication" "yes"
   set_ssh_config "PermitEmptyPasswords" "no"
+  set_ssh_config "PasswordAuthentication" "yes"
+  set_ssh_config "KbdInteractiveAuthentication" "no"
   set_ssh_config "ChallengeResponseAuthentication" "no"
+  set_ssh_config "PubkeyAuthentication" "yes"
+  set_ssh_config "GSSAPIAuthentication" "no"
+  set_ssh_config "PermitUserEnvironment" "no"
   set_ssh_config "UsePAM" "yes"
-  set_ssh_config "LogLevel" "VERBOSE"
-  set_ssh_config "X11Forwarding" "no"
-  set_ssh_config "MaxAuthTries" "4"
-  set_ssh_config "IgnoreRhosts" "yes"
+  set_ssh_config "AuthorizedKeysFile" ".ssh/authorized_keys"
+
+  log_action "Authentication settings configured"
+
+  log_action "Configuring access restrictions..."
+
   set_ssh_config "HostbasedAuthentication" "no"
-  set_ssh_config "LoginGraceTime" "60"
+  set_ssh_config "IgnoreRhosts" "yes"
+
+  log_action "Access restrictions configured"
+
+  log_action "Configuring session limits and timeouts..."
+
+  set_ssh_config "StrictModes" "yes"
+  set_ssh_config "LoginGraceTime" "30"
+  set_ssh_config "MaxAuthTries" "3"
+  set_ssh_config "MaxSessions" "2"
   set_ssh_config "ClientAliveInterval" "300"
   set_ssh_config "ClientAliveCountMax" "2"
-  set_ssh_config "AllowTcpForwarding" "no" # prevent SSH tunneling
+  set_ssh_config "TCPKeepAlive" "no"
+
+  log_action "Session limits and timeouts configured"
+
+  log_action "Configuring forwarding and tunneling (all disabled)..."
+
+  set_ssh_config "X11Forwarding" "no"
   set_ssh_config "AllowAgentForwarding" "no"
+  set_ssh_config "AllowTcpForwarding" "no"
+  set_ssh_config "GatewayPorts" "no"
   set_ssh_config "PermitTunnel" "no"
-  set_ssh_config "StrictModes" "yes"
-  set_ssh_config "PermitUserEnvironment" "no"
-  set_ssh_config "GSSAPIAuthentication" "no" # Kerberos
 
-  log_action "SSH Hardening complete (reboot required)"
-}
+  log_action "Forwarding and tunneling disabled"
 
-enable_tcp_syncookies() {
-  log_action "=== ENABLING IPv4 TCP SYN COOKIES ==="
+  log_action "Configuring logging and DNS..."
 
-  backup_file /etc/sysctl.conf
+  set_ssh_config "SyslogFacility" "AUTHPRIV"
+  set_ssh_config "LogLevel" "VERBOSE"
+  set_ssh_config "UseDNS" "no"
+  set_ssh_config "VersionAddendum" "none"
+  set_ssh_config "PrintMotd" "no"
+  set_ssh_config "PrintLastLog" "yes"
 
-  if grep -q "^.*net.ipv4.tcp_syncookies" /etc/sysctl.conf; then
-    sed -i 's/^#.*net.ipv4.tcp_syncookies.*/net.ipv4.tcp_syncookies=1/' /etc/sysctl.conf
-    log_action "Uncommented and enabled TCP SYN cookies"
-  elif grep -q "^net.ipv4.tcp_syncookies" /etc/sysctl.conf; then
-    sed -i 's/^.*net.ipv4.tcp_syncookies.*/net.ipv4.tcp_syncookies=1/' /etc/sysctl.conf
-    log_action "Enabled TCP SYN cookies"
-  else
-    echo "net.ipv4.tcp_syncookies=1" >>/etc/sysctl.conf
-    log_action "Enabled TCP SYN cookies (added new setting)"
+  log_action "Logging and DNS configured"
+
+  log_action "Configuring cryptographic algorithms..."
+
+  set_ssh_config "Ciphers" "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes256-ctr"
+  set_ssh_config "MACs" "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com"
+  set_ssh_config "KexAlgorithms" "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256"
+  log_action "Cryptographic algorithms configured"
+
+  log_action "Configuring SFTP subsystem..."
+
+  sed -i '/^#*\s*Subsystem\s\+sftp/d' /etc/ssh/sshd_config
+  echo "Subsystem sftp internal-sftp" >> /etc/ssh/sshd_config
+
+  log_action "SFTP subsystem configured"
+
+  # SSH banner
+  log_action "Creating SSH warning banner..."
+
+  local banner_file="/etc/issue.net"
+  if [ -f "$banner_file" ]; then
+    backup_file "$banner_file"
   fi
 
-  log_action "Applied TCP SYN cookies to running system (reboot required)"
+  cat > "$banner_file" << 'EOF'
+***************************************************************************
+                            AUTHORIZED USE ONLY
+***************************************************************************
+This system is for authorized users only. All activity may be monitored
+and reported. Unauthorized access is prohibited and the guys from enlo
+cypat team will get u >:(
+***************************************************************************
+EOF
+
+  chmod 644 "$banner_file"
+  set_ssh_config "Banner" "/etc/issue.net"
+
+  log_action "SSH banner created at $banner_file"
+
+  # Secure dir/file perms
+  log_action "Securing SSH directory and file permissions..."
+
+  chown root:root /etc/ssh
+  chmod 755 /etc/ssh
+
+  chmod 600 /etc/ssh/sshd_config
+  chown root:root /etc/ssh/sshd_config
+
+  for key in /etc/ssh/ssh_host_*_key; do
+    if [ -f "$key" ]; then
+      chmod 600 "$key"
+      chown root:root "$key"
+    fi
+  done
+
+  for pubkey in /etc/ssh/ssh_host_*_key.pub; do
+    if [ -f "$pubkey" ]; then
+      chmod 644 "$pubkey"
+      chown root:root "$pubkey"
+    fi
+  done
+
+  if [ -d /etc/ssh/sshd_config.d ]; then
+    chmod 755 /etc/ssh/sshd_config.d
+    for conf in /etc/ssh/sshd_config.d/*.conf; do
+      if [ -f "$conf" ]; then
+        chmod 644 "$conf"
+        chown root:root "$conf"
+      fi
+    done
+  fi
+
+  log_action "SSH directory permissions secured"
+
+  # moduli hardening
+  log_action "Hardening SSH moduli (removing weak DH groups)..."
+
+  local moduli_file="/etc/ssh/moduli"
+  if [ -f "$moduli_file" ]; then
+    backup_file "$moduli_file"
+
+    # Keep only moduli with bit length >= 3071 (column 5)
+    local temp_moduli="${moduli_file}.tmp"
+    awk '$5 >= 3071' "$moduli_file" > "$temp_moduli" 2>/dev/null
+
+    # Only replace if we have valid entries left
+    if [ -s "$temp_moduli" ]; then
+      mv "$temp_moduli" "$moduli_file"
+      chmod 644 "$moduli_file"
+      chown root:root "$moduli_file"
+      log_action "Removed weak DH groups from moduli (keeping >= 3071-bit)"
+    else
+      rm -f "$temp_moduli"
+      log_action "WARNING: No strong moduli found, keeping original file"
+    fi
+  else
+    log_action "Moduli file not found, skipping"
+  fi
+
+  log_action "Validating SSH configuration..."
+
+  if sshd -t 2>&1; then
+    log_action "SSH configuration is valid"
+  else
+    log_action "ERROR: SSH configuration has errors!"
+    log_action "Run 'sshd -t' to see details"
+    log_action "Restoring backup may be necessary"
+    return 1
+  fi
+
+  # Restart ssh
+  log_action "Restarting SSH service to apply changes..."
+
+  if command -v systemctl &>/dev/null; then
+    if systemctl list-unit-files | grep -q "^ssh\.service"; then
+      systemctl restart ssh &>/dev/null
+      if [ $? -eq 0 ]; then
+        log_action "SSH service (ssh) restarted successfully"
+      else
+        log_action "WARNING: Failed to restart ssh service"
+      fi
+    elif systemctl list-unit-files | grep -q "^sshd\.service"; then
+      systemctl restart sshd &>/dev/null
+      if [ $? -eq 0 ]; then
+        log_action "SSH service (sshd) restarted successfully"
+      else
+        log_action "WARNING: Failed to restart sshd service"
+      fi
+    else
+      log_action "WARNING: SSH service not found in systemctl"
+    fi
+  elif command -v service &>/dev/null; then
+    service ssh restart &>/dev/null || service sshd restart &>/dev/null
+    log_action "SSH service restarted (using service command)"
+  else
+    log_action "WARNING: Could not restart SSH service - do it manually"
+  fi
+
+  log_action "SSH hardening complete"
 }
 
 harden_kernel_sysctl() {
@@ -788,107 +1737,700 @@ harden_kernel_sysctl() {
 
   backup_file /etc/sysctl.conf
 
-  cat >>/etc/sysctl.conf <<'EOF'
-fs.file-max = 65535
-fs.protected_fifos = 2
-fs.protected_regular = 2
-fs.suid_dumpable = 0
-kernel.core_uses_pid = 1
-kernel.dmesg_restrict = 1
-kernel.exec-shield = 1
+  cat > /etc/sysctl.conf <<'EOF'
+##### KERNEL HARDENING
 kernel.sysrq = 0
 kernel.randomize_va_space = 2
+kernel.kptr_restrict = 2
+kernel.dmesg_restrict = 1
+kernel.perf_event_paranoid = 3
+kernel.perf_event_max_sample_rate = 1
+kernel.perf_cpu_time_max_percent = 1
+kernel.kexec_load_disabled = 1
+kernel.unprivileged_userns_clone = 0
+kernel.unprivileged_bpf_disabled = 1
+kernel.ftrace_enabled = 0
+kernel.debugfs.restrict = 1
+kernel.yama.ptrace_scope = 3
+kernel.panic_on_oops = 1
+kernel.maps_protect = 1
+kernel.core_uses_pid = 1
 kernel.pid_max = 65536
-net.core.rmem_max = 8388608
-net.core.wmem_max = 8388608
-net.core.netdev_max_backlog = 5000
-net.ipv4.tcp_rmem = 10240 87380 12582912
-net.ipv4.tcp_window_scaling = 1
-net.ipv4.tcp_wmem = 10240 87380 12582912
-net.ipv4.conf.all.accept_redirects = 0
-net.ipv4.conf.all.accept_source_route = 0
-net.ipv4.conf.all.log_martians = 1
-net.ipv4.conf.all.redirects = 0
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.conf.all.secure_redirects = 0
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.default.accept_redirects = 0
-net.ipv4.conf.default.accept_source_route = 0
-net.ipv4.conf.default.log_martians = 1
-net.ipv4.conf.default.rp_filter = 1
-net.ipv4.conf.default.secure_redirects = 0
-net.ipv4.conf.default.send_redirects = 0
-net.ipv4.icmp_echo_ignore_all = 1
-net.ipv4.icmp_echo_ignore_broadcasts = 1
-net.ipv4.icmp_ignore_bogus_error_responses = 1
-net.ipv4.ip_forward = 0
-net.ipv4.ip_local_port_range = 2000 65000
-net.ipv4.tcp_max_syn_backlog = 2048
-net.ipv4.tcp_synack_retries = 2
-net.ipv4.tcp_syncookies = 1
-net.ipv4.tcp_syn_retries = 5
-net.ipv4.tcp_timestamps = 0
+dev.tty.ldisc_autoload = 0
 
-# Disable IPv6
+##### MEMORY SAFETY
+fs.suid_dumpable = 0
+fs.protected_hardlinks = 1
+fs.protected_symlinks = 1
+fs.protected_fifos = 2
+fs.protected_regular = 2
+fs.file-max = 65535
+vm.unprivileged_userfaultfd = 0
+vm.mmap_min_addr = 65536
+
+##### DISABLE FORWARDING
+net.ipv4.ip_forward = 0
+net.ipv4.conf.all.forwarding = 0
+net.ipv4.conf.default.forwarding = 0
+net.ipv6.conf.all.forwarding = 0
+net.ipv6.conf.default.forwarding = 0
+
+##### DISABLE IPV6 ENTIRELY
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 
-# In case IPv6 is necessary
+##### SOURCE ROUTING & REDIRECTS
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.secure_redirects = 0
+net.ipv4.conf.default.secure_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
+##### REVERSE PATH FILTERING
+net.ipv4.conf.all.rp_filter = 2
+net.ipv4.conf.default.rp_filter = 2
+
+##### ARP HARDENING
+net.ipv4.conf.all.arp_ignore = 2
+net.ipv4.conf.default.arp_ignore = 2
+net.ipv4.conf.all.arp_announce = 2
+net.ipv4.conf.default.arp_announce = 2
+
+##### ICMP HYGIENE
+net.ipv4.icmp_echo_ignore_all = 1
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+
+##### TCP HARDENING
+net.ipv4.tcp_syncookies = 1
+net.ipv4.tcp_syn_retries = 2
+net.ipv4.tcp_synack_retries = 2
+net.ipv4.tcp_rfc1337 = 1
+net.ipv4.tcp_timestamps = 0
+net.ipv4.tcp_fastopen = 0
+net.ipv4.tcp_max_syn_backlog = 2048
+
+##### TCP PERFORMANCE (OPTIONAL)
+net.ipv4.tcp_window_scaling = 1
+net.ipv4.tcp_rmem = 10240 87380 12582912
+net.ipv4.tcp_wmem = 10240 87380 12582912
+net.ipv4.ip_local_port_range = 2000 65000
+net.core.rmem_max = 8388608
+net.core.wmem_max = 8388608
+net.core.netdev_max_backlog = 5000
+
+##### LOGGING
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.default.log_martians = 1
+
+##### IPV6 RA/AUTOCONF (STRICT IF IPV6 ENABLED)
+net.ipv6.conf.all.autoconf = 0
+net.ipv6.conf.default.autoconf = 0
+net.ipv6.conf.all.accept_ra = 0
+net.ipv6.conf.default.accept_ra = 0
 net.ipv6.conf.default.router_solicitations = 0
 net.ipv6.conf.default.accept_ra_rtr_pref = 0
 net.ipv6.conf.default.accept_ra_pinfo = 0
 net.ipv6.conf.default.accept_ra_defrtr = 0
-net.ipv6.conf.default.autoconf = 0
 net.ipv6.conf.default.dad_transmits = 0
 net.ipv6.conf.default.max_addresses = 1
+
+##### BOOTP/ARP PROXIES
+net.ipv4.conf.all.bootp_relay = 0
+net.ipv4.conf.all.proxy_arp = 0
+
+##### eBPF HARDENING
+net.core.bpf_jit_enable = 0
+net.core.bpf_jit_harden = 2
+
+##### BRIDGING (ONLY IF br_netfilter IS LOADED)
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-arptables = 1
 EOF
 
-  log_action "Applied hardening settings to /etc/sysctl.conf..."
-  log_action "Applying settings"
-  sysctl -p &>/dev/null
+  log_action "Applied comprehensive hardening settings to /etc/sysctl.conf"
+  log_action "Applying settings with sysctl -p..."
+  
+  sysctl -p 2>&1 | tee -a "$LOG_FILE" | while IFS= read -r line; do
+    if echo "$line" | grep -qE "No such file|cannot stat|error"; then
+      log_action "  INFO: $line (some parameters may not exist on this kernel)"
+    fi
+  done
 
-  if [ $? -eq 0 ]; then
+  if [ ${PIPESTATUS[0]} -eq 0 ]; then
     log_action "Sysctl hardening applied successfully"
   else
-    log_action "WARNING: Some settings may have failed"
-    sysctl -p >>"$LOG_FILE" 2>&1
+    log_action "WARNING: Some settings may have failed (check log)"
   fi
 
   log_action "Kernel hardening complete"
 }
 
+verify_sysctl_settings() {
+  log_action "=== VERIFYING SYSCTL SECURITY SETTINGS ==="
+
+  local checks_passed=0
+  local checks_failed=0
+
+  declare -A critical_checks=(
+    ["kernel.randomize_va_space"]="2"
+    ["kernel.sysrq"]="0"
+    ["kernel.kptr_restrict"]="2"
+    ["kernel.dmesg_restrict"]="1"
+    ["kernel.unprivileged_userns_clone"]="0"
+    ["kernel.unprivileged_bpf_disabled"]="1"
+    ["kernel.yama.ptrace_scope"]="3"
+    ["fs.suid_dumpable"]="0"
+    ["fs.protected_hardlinks"]="1"
+    ["fs.protected_symlinks"]="1"
+    ["fs.protected_fifos"]="2"
+    ["fs.protected_regular"]="2"
+    ["vm.mmap_min_addr"]="65536"
+    ["net.ipv4.ip_forward"]="0"
+    ["net.ipv4.conf.all.send_redirects"]="0"
+    ["net.ipv4.conf.all.accept_redirects"]="0"
+    ["net.ipv4.conf.all.accept_source_route"]="0"
+    ["net.ipv4.conf.all.rp_filter"]="2"
+    ["net.ipv4.conf.all.log_martians"]="1"
+    ["net.ipv4.conf.all.arp_ignore"]="2"
+    ["net.ipv4.conf.all.arp_announce"]="2"
+    ["net.ipv4.tcp_syncookies"]="1"
+    ["net.ipv4.tcp_syn_retries"]="2"
+    ["net.ipv4.tcp_synack_retries"]="2"
+    ["net.ipv4.tcp_rfc1337"]="1"
+    ["net.ipv4.tcp_timestamps"]="0"
+    ["net.ipv4.icmp_echo_ignore_all"]="1"
+    ["net.ipv4.icmp_echo_ignore_broadcasts"]="1"
+    ["net.ipv4.icmp_ignore_bogus_error_responses"]="1"
+    ["net.ipv6.conf.all.disable_ipv6"]="1"
+    ["net.core.bpf_jit_harden"]="2"
+  )
+
+  log_action "Checking critical security parameters..."
+  log_action ""
+
+  for param in "${!critical_checks[@]}"; do
+    local expected="${critical_checks[$param]}"
+    local actual
+    actual=$(sysctl -n "$param" 2>/dev/null)
+
+    if [[ -z "$actual" ]]; then
+      log_action "  ⚠ $param = NOT AVAILABLE (parameter doesn't exist on this kernel)"
+      checks_failed=$((checks_failed + 1))
+    elif [[ "$actual" == "$expected" ]]; then
+      log_action "  ✓ $param = $actual"
+      checks_passed=$((checks_passed + 1))
+    else
+      log_action "  ✗ $param = $actual (expected: $expected)"
+      checks_failed=$((checks_failed + 1))
+    fi
+  done
+
+  log_action ""
+  log_action "Verification Summary:"
+  log_action "  Checks passed: $checks_passed"
+  log_action "  Checks failed: $checks_failed"
+
+  if [[ $checks_failed -eq 0 ]]; then
+    log_action "All critical security settings verified successfully!"
+  else
+    log_action "WARNING: Some security settings failed verification"
+    log_action "Review the failed checks above. Some may not be available on your kernel version."
+  fi
+
+  return 0
+}
+
+harden_grub() {
+  log_action "=== HARDENING GRUB BOOTLOADER ==="
+
+  # perms
+  log_action "Securing GRUB configuration files..."
+  local grub_files=(
+    "/boot/grub/grub.cfg"
+    "/boot/grub2/grub.cfg"
+    "/boot/grub/grub.conf"
+    "/boot/efi/EFI/ubuntu/grub.cfg"
+    "/boot/efi/EFI/linuxmint/grub.cfg"
+    "/boot/efi/EFI/BOOT/grub.cfg"
+  )
+
+  for grub_file in "${grub_files[@]}"; do
+    if [[ -f "$grub_file" ]]; then
+      backup_file "$grub_file"
+      chown root:root "$grub_file" &>/dev/null
+      chmod 600 "$grub_file" &>/dev/null
+      log_action "Secured $grub_file (600, root:root)"
+    fi
+  done
+
+  log_action "Enforcing GRUB signature verification..."
+  local grub_default="/etc/default/grub"
+  local grub_custom="/etc/grub.d/40_custom"
+  local needs_update=false
+
+  if [[ -f "$grub_default" ]]; then
+    backup_file "$grub_default"
+
+    if grep -q "^GRUB_VERIFY_SIGNATURES" "$grub_default"; then
+      sed -i 's/^GRUB_VERIFY_SIGNATURES=.*/GRUB_VERIFY_SIGNATURES=true/' "$grub_default"
+    else
+      echo 'GRUB_VERIFY_SIGNATURES=true' >> "$grub_default"
+    fi
+    needs_update=true
+    log_action "Enabled GRUB_VERIFY_SIGNATURES in $grub_default"
+  fi
+
+  if [[ -f "$grub_custom" ]]; then
+    backup_file "$grub_custom"
+
+    local temp_file=$(mktemp)
+    local removed_insecure=false
+
+    while IFS= read -r line; do
+      if [[ "$line" =~ ^set[[:space:]]+superusers || "$line" =~ ^password ]]; then
+        removed_insecure=true
+        continue
+      fi
+      echo "$line" >> "$temp_file"
+    done < "$grub_custom"
+
+    if ! grep -q "^set check_signatures" "$temp_file"; then
+      echo "set check_signatures=enforce" >> "$temp_file"
+    fi
+
+    cat "$temp_file" > "$grub_custom"
+    rm -f "$temp_file"
+
+    [[ "$removed_insecure" == true ]] && log_action "Removed insecure superuser entries from $grub_custom"
+    needs_update=true
+  fi
+
+  if [[ "$needs_update" == true ]] && command -v update-grub &>/dev/null; then
+    update-grub &>/dev/null && log_action "Regenerated GRUB configuration"
+  fi
+
+  # NEED MANUALLY SET GRUB PASSWORD
+  if [[ ! -f /etc/grub.d/01_password ]]; then
+    log_action "GRUB password not configured. Manual steps required:"
+    log_action "  1. sudo grub-mkpasswd-pbkdf2"
+    log_action "  2. Create /etc/grub.d/01_password containing:"
+    log_action "     set superusers=\"admin\""
+    log_action "     password_pbkdf2 admin <YOUR_HASH>"
+    log_action "  3. sudo chmod 600 /etc/grub.d/01_password"
+    log_action "  4. sudo update-grub"
+  else
+    log_action "GRUB password configuration exists at /etc/grub.d/01_password"
+  fi
+
+  log_action "GRUB hardening complete"
+}
+
+remove_rbash() {
+  log_action "=== REMOVING RESTRICTED BASH ARTIFACTS ==="
+
+  local targets=("/usr/bin/rbash" "/usr/share/doc/bash/RBASH")
+  local removed=0
+
+  for target in "${targets[@]}"; do
+    if [[ -e "$target" ]]; then
+      rm -rf "$target" &>/dev/null && ((removed++))
+      log_action "Removed: $target"
+    fi
+  done
+
+  [[ $removed -eq 0 ]] && log_action "No restricted bash artifacts found"
+}
+
+# 027 file permissions for new files
+enforce_umask() {
+  log_action "=== ENFORCING SECURE UMASK ==="
+
+  local login_defs="/etc/login.defs"
+
+  if [[ -f "$login_defs" ]]; then
+    backup_file "$login_defs"
+    if grep -qE "^\s*UMASK" "$login_defs"; then
+      sed -i 's/^\s*UMASK.*/UMASK 027/' "$login_defs"
+    else
+      echo "UMASK 027" >> "$login_defs"
+    fi
+    log_action "Set UMASK to 027 in $login_defs"
+  fi
+
+  for profile in /etc/profile /etc/bash.bashrc; do
+    if [[ -f "$profile" ]] && ! grep -q "^umask 027" "$profile"; then
+      echo "umask 027" >> "$profile"
+      log_action "Added umask 027 to $profile"
+    fi
+  done
+}
+
+secure_home_directories() {
+  log_action "=== SECURING HOME DIRECTORY PERMISSIONS ==="
+
+  local adjusted=0
+
+  for dir in /home/*; do
+    [[ -d "$dir" ]] || continue
+    local current_perm=$(stat -c "%a" "$dir" 2>/dev/null)
+
+    if [[ "$current_perm" -gt 750 ]]; then
+      chmod 750 "$dir" &>/dev/null
+      ((adjusted++))
+      log_action "Tightened $dir: $current_perm -> 750"
+    fi
+  done
+
+  [[ $adjusted -eq 0 ]] && log_action "All home directories already secure"
+}
+
+secure_tmp_mount() {
+  log_action "=== SECURING /tmp MOUNT ==="
+
+  [[ -d /tmp ]] && chmod 1777 /tmp &>/dev/null && log_action "Set /tmp sticky bit (1777)"
+
+  if [[ -L /tmp ]]; then
+    log_action "/tmp is a symlink, skipping mount unit"
+    return 0
+  fi
+
+  if ! command -v systemctl &>/dev/null; then
+    log_action "systemctl not available, skipping tmp.mount"
+    return 0
+  fi
+
+  local tmp_mount="/etc/systemd/system/tmp.mount"
+  [[ -f "$tmp_mount" ]] && backup_file "$tmp_mount"
+
+  cat > "$tmp_mount" <<'EOF'
+[Unit]
+Description=Temporary Directory (/tmp)
+Documentation=man:hier(7)
+ConditionPathIsSymbolicLink=!/tmp
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,nosuid,nodev,noexec
+
+[Install]
+WantedBy=local-fs.target
+EOF
+
+  systemctl daemon-reload &>/dev/null
+  systemctl enable tmp.mount &>/dev/null
+  systemctl start tmp.mount &>/dev/null && log_action "Created and started secure tmp.mount" || log_action "tmp.mount enabled (applies on reboot)"
+}
+
+secure_dev_shm() {
+  log_action "=== SECURING /dev/shm ==="
+
+  backup_file /etc/fstab
+
+  if grep -qE '^\s*tmpfs\s+/dev/shm\s+tmpfs' /etc/fstab; then
+    sed -i 's|^\s*tmpfs\s\+/dev/shm\s\+tmpfs\s\+.*|tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0|' /etc/fstab
+    log_action "Updated /dev/shm entry in /etc/fstab"
+  else
+    echo 'tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0' >> /etc/fstab
+    log_action "Added /dev/shm to /etc/fstab"
+  fi
+
+  mount -o remount,noexec,nosuid,nodev /dev/shm &>/dev/null && log_action "Remounted /dev/shm with secure options"
+  chmod 1777 /dev/shm &>/dev/null
+}
+
+# locks doen /proc with hidepid=2 (user can only see their own processes)
+setup_proc_hidepid() {
+  log_action "=== CONFIGURING /proc PROCESS HIDING ==="
+
+  if ! getent group proc &>/dev/null; then
+    groupadd -f proc &>/dev/null
+    log_action "Created 'proc' group"
+  fi
+
+  local proc_gid=$(getent group proc | cut -d: -f3)
+
+  backup_file /etc/fstab
+
+  if grep -qE '^\s*proc\s+/proc\s+proc' /etc/fstab; then
+    sed -i "s|^\s*proc\s\+/proc\s\+proc\s\+.*|proc /proc proc defaults,hidepid=2,gid=$proc_gid 0 0|" /etc/fstab
+    log_action "Updated /proc entry in /etc/fstab"
+  else
+    echo "proc /proc proc defaults,hidepid=2,gid=$proc_gid 0 0" >> /etc/fstab
+    log_action "Added /proc to /etc/fstab"
+  fi
+
+  mount -o remount,hidepid=2,gid="$proc_gid" /proc &>/dev/null && log_action "Remounted /proc with hidepid=2"
+  log_action "Add admins to 'proc' group: usermod -aG proc <user>"
+}
+
+configure_host_conf() {
+  log_action "=== CONFIGURING /etc/host.conf ==="
+
+  local host_conf="/etc/host.conf"
+  [[ -f "$host_conf" ]] && backup_file "$host_conf"
+
+  cat > "$host_conf" <<'EOF'
+order bind,hosts
+multi on
+nospoof on
+EOF
+
+  chown root:root "$host_conf" &>/dev/null
+  chmod 644 "$host_conf" &>/dev/null
+  log_action "Configured anti-spoofing in $host_conf"
+}
+
+configure_screen_security() {
+  log_action "=== CONFIGURING SCREEN TIMEOUT AND LOCKING ==="
+
+  local dconf_dir="/etc/dconf/db/local.d"
+  local lock_dir="/etc/dconf/db/local.d/locks"
+
+  mkdir -p "$dconf_dir" "$lock_dir"
+
+  cat > "$dconf_dir/00-cyberpatriot-screen" <<'EOF'
+[org/gnome/desktop/session]
+idle-delay=uint32 300
+
+[org/gnome/desktop/screensaver]
+idle-activation-enabled=true
+lock-delay=uint32 0
+lock-enabled=true
+
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='suspend'
+sleep-inactive-ac-timeout=1800
+sleep-inactive-battery-type='suspend'
+sleep-inactive-battery-timeout=1200
+power-button-action='interactive'
+
+[org/cinnamon/desktop/session]
+idle-delay=uint32 300
+
+[org/cinnamon/desktop/screensaver]
+idle-activation-enabled=true
+lock-delay=uint32 0
+lock-enabled=true
+
+[org/cinnamon/settings-daemon/plugins/power]
+sleep-inactive-ac-type='suspend'
+sleep-inactive-ac-timeout=1800
+sleep-inactive-battery-type='suspend'
+sleep-inactive-battery-timeout=1200
+power-button-action='interactive'
+EOF
+
+  cat > "$lock_dir/00-cyberpatriot-screen" <<'EOF'
+/org/gnome/desktop/session/idle-delay
+/org/gnome/desktop/screensaver/idle-activation-enabled
+/org/gnome/desktop/screensaver/lock-delay
+/org/gnome/desktop/screensaver/lock-enabled
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-type
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-ac-timeout
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-type
+/org/gnome/settings-daemon/plugins/power/sleep-inactive-battery-timeout
+/org/gnome/settings-daemon/plugins/power/power-button-action
+/org/cinnamon/desktop/session/idle-delay
+/org/cinnamon/desktop/screensaver/idle-activation-enabled
+/org/cinnamon/desktop/screensaver/lock-delay
+/org/cinnamon/desktop/screensaver/lock-enabled
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-ac-type
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-ac-timeout
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-battery-type
+/org/cinnamon/settings-daemon/plugins/power/sleep-inactive-battery-timeout
+/org/cinnamon/settings-daemon/plugins/power/power-button-action
+EOF
+
+  command -v dconf &>/dev/null && dconf update &>/dev/null && log_action "Applied screen timeout/locking policies"
+}
+
+disable_xserver_tcp() {
+  log_action "=== DISABLING X SERVER TCP CONNECTIONS ==="
+
+  local configs_created=0
+
+  mkdir -p /etc/X11/xorg.conf.d
+  cat > /etc/X11/xorg.conf.d/10-nolisten.conf <<'EOF'
+Section "ServerFlags"
+    Option "DisallowTCP" "true"
+EndSection
+EOF
+  ((configs_created++))
+  log_action "Created /etc/X11/xorg.conf.d/10-nolisten.conf"
+
+  if [[ -f /etc/gdm3/custom.conf ]]; then
+    backup_file /etc/gdm3/custom.conf
+    if grep -q "^DisallowTCP=" /etc/gdm3/custom.conf; then
+      sed -i 's/^DisallowTCP=.*/DisallowTCP=true/' /etc/gdm3/custom.conf
+    elif grep -q "^\[security\]" /etc/gdm3/custom.conf; then
+      sed -i '/^\[security\]/a DisallowTCP=true' /etc/gdm3/custom.conf
+    else
+      echo -e "\n[security]\nDisallowTCP=true" >> /etc/gdm3/custom.conf
+    fi
+    ((configs_created++))
+    log_action "Configured GDM3 to disable TCP"
+  fi
+
+  if [[ -f /etc/lightdm/lightdm.conf ]] || [[ -d /etc/lightdm/lightdm.conf.d ]]; then
+    mkdir -p /etc/lightdm/lightdm.conf.d
+    cat > /etc/lightdm/lightdm.conf.d/50-nolisten.conf <<'EOF'
+[Seat:*]
+xserver-allow-tcp=false
+EOF
+    ((configs_created++))
+    log_action "Configured LightDM to disable TCP"
+  fi
+
+  log_action "X Server TCP disabled in $configs_created config(s)"
+}
+
+validate_gdm3_config() {
+  log_action "=== VALIDATING GDM3 USER CONFIGURATION ==="
+
+  local gdm_custom="/etc/gdm3/custom.conf"
+  local gdm_dropin="/etc/systemd/system/gdm.service.d"
+  local sanitized=false
+
+  if [[ -f "$gdm_custom" ]]; then
+    backup_file "$gdm_custom"
+    if grep -q "^User=" "$gdm_custom"; then
+      sed -i '/^User=/d' "$gdm_custom"
+      sanitized=true
+    fi
+    if grep -q "^Group=" "$gdm_custom"; then
+      sed -i '/^Group=/d' "$gdm_custom"
+      sanitized=true
+    fi
+  fi
+
+  if [[ -d "$gdm_dropin" ]]; then
+    for file in "$gdm_dropin"/*.conf; do
+      [[ -f "$file" ]] || continue
+      backup_file "$file"
+      if grep -q "^User=" "$file"; then
+        sed -i '/^User=/d' "$file"
+        sanitized=true
+      fi
+      if grep -q "^Group=" "$file"; then
+        sed -i '/^Group=/d' "$file"
+        sanitized=true
+      fi
+    done
+  fi
+
+  if [[ "$sanitized" == true ]]; then
+    command -v systemctl &>/dev/null && systemctl daemon-reload &>/dev/null
+    log_action "Removed custom user/group overrides for GDM3"
+  else
+    log_action "No problematic GDM3 configuration found"
+  fi
+}
 #===============================================
 # Firewall
 #===============================================
 
 configure_firewall() {
-  log_action "=== CONFIGURING UFW FIREWALL ==="
+  log_action "=== CONFIGURING ENHANCED UFW FIREWALL ==="
 
-  # Remove iptables-persistent
-  if dpkg -l | grep -q iptables-persistent; then
-    apt purge -y iptables-persistent
-    log_action "Removed iptables-persistent"
+  if ! command -v ufw &>/dev/null; then
+    log_action "UFW not found, installing..."
+    apt-get install -y ufw &>/dev/null
+    log_action "UFW installed"
+  else
+    log_action "UFW already installed"
   fi
 
-  ufw --force reset
-  log_action "Reset UFW to defaults"
+  log_action "Setting UFW default policies..."
+  ufw default deny incoming >/dev/null 2>&1
+  ufw default allow outgoing >/dev/null 2>&1
+  ufw default deny routed >/dev/null 2>&1
+  log_action "Default policies: deny incoming, allow outgoing, deny routed"
 
-  # Loopback rules
-  ufw allow in on lo
-  ufw allow out on lo
-  ufw deny in from 127.0.0.0/8
-  ufw deny in from ::1
-  log_action "Configured loopback rules"
+  log_action "Configuring loopback rules (CIS Benchmark)..."
+  ufw allow in on lo >/dev/null 2>&1
+  ufw allow out on lo >/dev/null 2>&1
+  ufw deny in from 127.0.0.0/8 >/dev/null 2>&1
+  ufw deny in from ::1 >/dev/null 2>&1
+  log_action "Loopback protection configured"
 
-  # Default policies
-  ufw default deny incoming
-  ufw default allow outgoing
-  ufw default deny routed
-  log_action "Set default policies"
+  log_action "Configuring SSH rate limiting..."
+  ufw --force delete allow 22/tcp >/dev/null 2>&1
+  ufw --force delete allow ssh >/dev/null 2>&1
+  ufw limit 22/tcp >/dev/null 2>&1
+  log_action "SSH rate limiting enabled (blocks brute-force attacks)"
 
-  ufw --force enable
-  log_action "UFW enabled"
+  log_action "Setting UFW logging to high..."
+  ufw logging high >/dev/null 2>&1
+
+  if [[ -f /etc/default/ufw ]]; then
+    if ! grep -q "^IPV6=yes" /etc/default/ufw; then
+      sed -i 's/^IPV6=.*/IPV6=yes/' /etc/default/ufw 2>/dev/null || echo "IPV6=yes" >> /etc/default/ufw
+      log_action "Enabled IPv6 support in UFW"
+    fi
+  fi
+
+  log_action "Denying unnecessary ports..."
+  local unnecessary_ports=("21/tcp" "23/tcp" "25/tcp" "80/tcp" "110/tcp" "143/tcp" "445/tcp" "3389/tcp" "1900/udp")
+  
+  for port_proto in "${unnecessary_ports[@]}"; do
+    local port="${port_proto%/*}"
+    local proto="${port_proto#*/}"
+    
+    local in_use=false
+    if command -v ss &>/dev/null; then
+      if ss -lntu | awk -v p="$port" -v proto="$proto" '$1 == proto && $5 ~ (":" p "$")' | grep -q .; then
+        in_use=true
+      fi
+    fi
+
+    if [[ "$in_use" == true ]]; then
+      log_action "Port $port_proto is in use, skipping deny rule"
+    else
+      if ! ufw status | grep -q "DENY[[:space:]]\+$port_proto"; then
+        ufw deny "$port_proto" >/dev/null 2>&1
+        log_action "Denied unused port $port_proto"
+      fi
+    fi
+  done
+
+  log_action "Enabling UFW..."
+  echo "y" | ufw enable >/dev/null 2>&1
+  
+  if command -v systemctl &>/dev/null; then
+    systemctl enable ufw >/dev/null 2>&1
+  fi
+
+  log_action "Verifying UFW configuration..."
+  local status_output=$(ufw status verbose 2>/dev/null)
+  
+  if echo "$status_output" | grep -q "Status: active"; then
+    log_action "UFW is active"
+  else
+    log_action "WARNING: UFW may not be active"
+  fi
+
+  if echo "$status_output" | grep -q "deny (incoming)"; then
+    log_action "Default incoming: deny"
+  fi
+
+  if echo "$status_output" | grep -q "allow (outgoing)"; then
+    log_action "Default outgoing: allow"
+  fi
 
   log_action "Firewall configuration complete"
 }
@@ -1082,7 +2624,1129 @@ remove_prohibited_media() {
     done
   done
 
-  log_action "Removed prohibited media"
+  log_action "Possible prohibited media found (NOT REMOVED)"
+}
+
+#===============================================
+# Service Hardening
+#===============================================
+
+harden_vsftp() {
+  log_action "=== HARDENING VSFTP ==="
+
+  local config=""
+  if [ -f "/etc/vsftpd.conf" ]; then
+    config="/etc/vsftpd.conf"
+  elif [ -f "/etc/vsftpd/vsftpd.conf" ]; then
+    config="/etc/vsftpd/vsftpd.conf"
+  else
+    log_action "vsftpd not installed (no config found), skipping"
+    return 0
+  fi
+
+  log_action "Found vsftpd config: $config"
+  backup_file "$config"
+
+  set_option() {
+    local option="$1"
+    local value="$2"
+
+    if grep -q "^#*\s*${option}=" "$config"; then
+      sed -i "s/^#*\s*${option}=.*/${option}=${value}/" "$config"
+    else
+      echo "${option}=${value}" >> "$config"
+    fi
+  }
+
+  log_action "Configuring user access settings..."
+
+  set_option "anonymous_enable" "NO"
+  set_option "local_enable" "YES"
+  set_option "write_enable" "NO"
+  set_option "chroot_local_user" "YES"
+  set_option "allow_writable_chroot" "NO"
+  set_option "hide_ids" "YES"
+
+  log_action "User access settings configured"
+
+  log_action "Configuring server identity and security..."
+
+  set_option "ftpd_banner" "FTP server ready..."
+  set_option "nopriv_user" "nobody"
+
+  log_action "Server identity configured"
+
+  log_action "Configuring logging"
+
+  set_option "xferlog_enable" "YES"
+  set_option "xferlog_std_format" "NO"
+  set_option "log_ftp_protocol" "YES"
+
+  log_action "Logging configured"
+
+  log_action "Configuring passive mode..."
+
+  set_option "pasv_enable" "YES"
+  set_option "pasv_min_port" "40000"
+  set_option "pasv_max_port" "50000"
+  set_option "pasv_promiscuous" "NO"
+  set_option "port_promiscuous" "NO"
+
+  log_action "Passive mode configured (ports 40k-50k)"
+
+  log_action "Configuring TLS encryption..."
+
+  set_option "ssl_enable" "YES"
+  set_option "force_local_logins_ssl" "YES"
+  set_option "force_local_data_ssl" "YES"
+  set_option "allow_anon_ssl" "NO"
+  set_option "require_ssl_reuse" "NO"
+
+  set_option "ssl_sslv2" "NO"
+  set_option "ssl_sslv3" "NO"
+  set_option "ssl_tlsv1" "NO"
+
+  set_option "ssl_ciphers" "HIGH"
+
+  set_option "rsa_cert_file" "/etc/ssl/certs/ssl-cert-snakeoil.pem"
+  set_option "rsa_private_key_file" "/etc/ssl/private/ssl-cert-snakeoil.key"
+
+  log_action "TLS encryption configured"
+
+  log_action "Configuring PAM and networks settings"
+
+  set_option "pam_service_name" "vsftpd"
+
+  set_option "listen" "YES"
+  set_option "listen_ipv6" "NO"
+
+  log_action "PAM and network settings configured"
+
+  log_action "Securing config file permissions..."
+
+  chmod 600 "$config"
+  chown root:root "$config"
+
+  log_action "Config file secured (chmod 600, owned by root)"
+
+  log_action "Restarting vsftpd service"
+  if systemctl is-active vsftpd &>/dev/null; then
+    systemctl restart vsftpd &>/dev/null
+    if [ $? -eq 0 ]; then
+      log_action "vsftpd service restarted successfully"
+    else
+      log_action "WARNING: failed to restart vsftpd"
+    fi
+  elif service vsftpd status &>/dev/null; then
+    service vsftpd restart &>/dev/null
+    log_action "vsftpd service restarted (using service command)"
+  else
+    log_action "vsftpd service not running - start manually with: sudo systemctl start vsftpd"
+  fi
+
+  log_action "vsftpd hardening complete"
+}
+
+harden_apache() {
+  log_action "=== HARDENING APACHE CONFIGURATION ==="
+
+  if ! command -v apache2 &>/dev/null && ! command -v apachectl &>/dev/null; then
+    log_action "Apache not installed, skipping"
+    return 0
+  fi
+
+  if [ ! -d /etc/apache2 ]; then
+    log_action "WARNING: /etc/apache2 not found"
+    return 0
+  fi
+
+  local CONF_AVAILABLE="/etc/apache2/conf-available"
+  local CONF_ENABLED="/etc/apache2/conf-enabled"
+  local MODS_ENABLED="/etc/apache2/mods-enabled"
+  local SECURITY_CONF="$CONF_AVAILABLE/99-security-hardening.conf"
+  local HEADERS_CONF="$CONF_AVAILABLE/security-headers.conf"
+
+  mkdir -p "$CONF_AVAILABLE"
+
+  log_action "Creating hardened Apache security configuration"
+  cat > "$SECURITY_CONF" <<'EOF'
+# === CyberPatriot Apache Security Hardening ===
+
+# Hide Apache version and OS information
+ServerTokens Prod
+ServerSignature Off
+
+# Disable HTTP TRACE method (prevents XST attacks)
+TraceEnable Off
+
+# Disable ETag (prevents inode disclosure)
+FileETag None
+
+# Timeout settings (DoS protection)
+Timeout 60
+KeepAliveTimeout 5
+
+# Request size limits
+LimitRequestBody 10485760
+LimitRequestFields 100
+LimitRequestFieldSize 8190
+LimitRequestLine 8190
+
+# Root directory - deny all by default
+<Directory />
+    Options -Indexes -FollowSymLinks
+    AllowOverride None
+    Require all denied
+</Directory>
+
+# Web root hardening
+<Directory /var/www/>
+    Options -Indexes -FollowSymLinks
+    AllowOverride None
+    Require all granted
+</Directory>
+
+# Block access to .ht files
+<FilesMatch "^\.ht">
+    Require all denied
+</FilesMatch>
+
+# Block access to version control directories
+<DirectoryMatch "/\.(git|svn|hg|bzr)">
+    Require all denied
+</DirectoryMatch>
+
+# Block access to backup files
+<FilesMatch "(~|\.bak|\.swp|\.tmp|\.old|\.orig)$">
+    Require all denied
+</FilesMatch>
+EOF
+  chmod 644 "$SECURITY_CONF"
+  log_action "Created $SECURITY_CONF"
+
+  log_action "Creating security headers configuration"
+  cat > "$HEADERS_CONF" <<'EOF'
+# === Apache Security Headers ===
+
+<IfModule mod_headers.c>
+    # Prevent clickjacking
+    Header always set X-Frame-Options "SAMEORIGIN"
+
+    # Prevent MIME-sniffing
+    Header always set X-Content-Type-Options "nosniff"
+
+    # Enable XSS filter
+    Header always set X-XSS-Protection "1; mode=block"
+
+    # Control referrer information
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+
+    # Remove server information headers
+    Header unset Server
+    Header always unset X-Powered-By
+
+    # Permissions Policy
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+
+    # HSTS (uncomment for HTTPS sites only)
+    # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+</IfModule>
+EOF
+  chmod 644 "$HEADERS_CONF"
+  log_action "Created $HEADERS_CONF"
+
+  log_action "Enabling required Apache modules"
+  if command -v a2enmod &>/dev/null; then
+    if [ ! -e "$MODS_ENABLED/headers.load" ]; then
+      a2enmod headers &>/dev/null && log_action "Enabled mod_headers"
+    fi
+  fi
+
+  log_action "Disabling unnecessary Apache modules"
+  if command -v a2dismod &>/dev/null; then
+    for mod in autoindex status info userdir cgi cgid; do
+      if [ -e "$MODS_ENABLED/${mod}.load" ]; then
+        a2dismod "$mod" &>/dev/null && log_action "Disabled mod_$mod"
+      fi
+    done
+  fi
+
+  log_action "Enabling security configurations"
+  if command -v a2enconf &>/dev/null; then
+    a2enconf 99-security-hardening &>/dev/null && log_action "Enabled 99-security-hardening"
+    a2enconf security-headers &>/dev/null && log_action "Enabled security-headers"
+  else
+    ln -sf "$SECURITY_CONF" "$CONF_ENABLED/99-security-hardening.conf" 2>/dev/null
+    ln -sf "$HEADERS_CONF" "$CONF_ENABLED/security-headers.conf" 2>/dev/null
+  fi
+
+  log_action "Securing Apache configuration permissions"
+  chown -R root:root /etc/apache2
+  chmod 755 /etc/apache2
+  find /etc/apache2 -type f -exec chmod 644 {} \;
+  find /etc/apache2 -type d -exec chmod 755 {} \;
+  log_action "Secured /etc/apache2 permissions"
+
+  log_action "Securing web root permissions"
+  local WEB_ROOT="/var/www/html"
+  if [ -d "$WEB_ROOT" ]; then
+    chown -R root:root "$WEB_ROOT"
+    find "$WEB_ROOT" -type d -exec chmod 755 {} \;
+    find "$WEB_ROOT" -type f -exec chmod 644 {} \;
+    log_action "Secured $WEB_ROOT (755/644, root:root)"
+  fi
+
+  if [ -d /var/log/apache2 ]; then
+    chown -R root:adm /var/log/apache2
+    chmod 750 /var/log/apache2
+    find /var/log/apache2 -type f -exec chmod 640 {} \;
+    log_action "Secured /var/log/apache2 permissions"
+  fi
+
+  log_action "Validating Apache configuration"
+  local VALID=0
+  if command -v apache2ctl &>/dev/null; then
+    if apache2ctl configtest 2>&1 | grep -qi "syntax ok"; then
+      VALID=1
+      log_action "Apache configuration is valid"
+    fi
+  elif command -v apachectl &>/dev/null; then
+    if apachectl configtest 2>&1 | grep -qi "syntax ok"; then
+      VALID=1
+      log_action "Apache configuration is valid"
+    fi
+  fi
+
+  if [ "$VALID" -eq 0 ]; then
+    log_action "WARNING: Apache configuration validation failed"
+    apache2ctl configtest 2>&1 | head -10
+  fi
+
+  log_action "Reloading Apache service"
+  if systemctl is-active apache2 &>/dev/null; then
+    if [ "$VALID" -eq 1 ]; then
+      systemctl reload apache2 2>/dev/null && log_action "Apache reloaded successfully"
+    else
+      log_action "WARNING: Skipping reload due to config errors"
+    fi
+  else
+    log_action "Apache not running, changes apply on next start"
+  fi
+
+  log_action "Apache hardening complete"
+  log_action "Security applied: version hidden, TRACE disabled, directory listing off, security headers enabled"
+}
+
+harden_nginx() {
+  log_action "=== HARDENING NGINX CONFIGURATION ==="
+
+  if ! command -v nginx &>/dev/null; then
+    log_action "NGINX not installed, skipping"
+    return 0
+  fi
+
+  local NGINX_USER="www-data"
+  if id -u nginx &>/dev/null; then
+    NGINX_USER="nginx"
+  fi
+
+  set_nginx() {
+    local key="$1"
+    local val="$2"
+    sed -i "/^\s*${key}/d" /etc/nginx/nginx.conf
+    sed -i "/http {/a\\    ${key} ${val};" /etc/nginx/nginx.conf
+    log_action "Set ${key} ${val}"
+  }
+
+  backup_file /etc/nginx/nginx.conf
+
+  log_action "Disabling server version disclosure"
+  set_nginx "server_tokens" "off"
+
+  log_action "Configuring buffer limits (DoS protection)"
+  set_nginx "client_body_buffer_size" "1k"
+  set_nginx "client_header_buffer_size" "1k"
+  set_nginx "client_max_body_size" "1m"
+  set_nginx "large_client_header_buffers" "2 1k"
+
+  log_action "Configuring connection timeouts"
+  set_nginx "client_body_timeout" "10s"
+  set_nginx "client_header_timeout" "10s"
+  set_nginx "keepalive_timeout" "5s"
+  set_nginx "send_timeout" "10s"
+
+  log_action "Creating security headers snippet"
+  mkdir -p /etc/nginx/snippets
+  cat > /etc/nginx/snippets/security-headers.conf <<'EOF'
+add_header X-XSS-Protection "1; mode=block" always;
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self';" always;
+add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()" always;
+proxy_hide_header X-Powered-By;
+fastcgi_hide_header X-Powered-By;
+EOF
+  chmod 644 /etc/nginx/snippets/security-headers.conf
+
+  log_action "Creating SSL/TLS hardening snippet"
+  cat > /etc/nginx/snippets/ssl-params.conf <<'EOF'
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_prefer_server_ciphers on;
+ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384';
+ssl_session_timeout 1d;
+ssl_session_cache shared:SSL:50m;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;
+EOF
+  chmod 644 /etc/nginx/snippets/ssl-params.conf
+
+  log_action "Creating HSTS snippet"
+  cat > /etc/nginx/snippets/hsts.conf <<'EOF'
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+EOF
+  chmod 644 /etc/nginx/snippets/hsts.conf
+
+  log_action "Creating general hardening config"
+  mkdir -p /etc/nginx/conf.d
+  cat > /etc/nginx/conf.d/99-security-hardening.conf <<'EOF'
+autoindex off;
+server_tokens off;
+map $request_method $allowed_method {
+    default 0;
+    GET 1;
+    POST 1;
+    HEAD 1;
+}
+limit_req_zone $binary_remote_addr zone=general:10m rate=10r/s;
+limit_req_status 429;
+limit_conn_zone $binary_remote_addr zone=addr:10m;
+limit_conn_status 429;
+EOF
+  chmod 644 /etc/nginx/conf.d/99-security-hardening.conf
+
+  if [ -f /etc/nginx/sites-available/default ]; then
+    log_action "Updating default site config"
+    backup_file /etc/nginx/sites-available/default
+    if ! grep -q "include snippets/security-headers.conf" /etc/nginx/sites-available/default; then
+      sed -i '/server {/a\    include snippets/security-headers.conf;' /etc/nginx/sites-available/default
+    fi
+    if ! grep -q 'location ~ /\.' /etc/nginx/sites-available/default; then
+      sed -i '/server {/a\    location ~ /\\. { deny all; }' /etc/nginx/sites-available/default
+    fi
+  fi
+
+  log_action "Securing NGINX config permissions"
+  chown -R root:root /etc/nginx
+  chmod 644 /etc/nginx/nginx.conf
+  find /etc/nginx/sites-available -type f -exec chmod 644 {} \; 2>/dev/null
+  find /etc/nginx/conf.d -type f -exec chmod 644 {} \; 2>/dev/null
+  find /etc/nginx/snippets -type f -exec chmod 644 {} \; 2>/dev/null
+
+  log_action "Securing SSL private keys"
+  for keydir in /etc/ssl/private /etc/nginx/ssl /etc/letsencrypt; do
+    if [ -d "$keydir" ]; then
+      find "$keydir" -type f \( -name "*.key" -o -name "*-key.pem" \) -exec chmod 600 {} \; -exec chown root:root {} \; 2>/dev/null
+    fi
+  done
+
+  log_action "Securing web root"
+  for webroot in /var/www/html /var/www /usr/share/nginx/html; do
+    if [ -d "$webroot" ]; then
+      chown -R root:root "$webroot"
+      find "$webroot" -type d -exec chmod 755 {} \;
+      find "$webroot" -type f -exec chmod 644 {} \;
+      log_action "Secured web root: $webroot"
+      break
+    fi
+  done
+
+  log_action "Validating NGINX configuration"
+  if nginx -t &>/dev/null; then
+    log_action "Configuration valid, reloading NGINX"
+    systemctl reload nginx 2>/dev/null || service nginx reload 2>/dev/null
+  else
+    log_action "WARNING: NGINX config has errors, not reloading"
+    nginx -t
+  fi
+
+  log_action "NGINX hardening complete"
+}
+
+harden_php() {
+  log_action "=== HARDENING PHP CONFIGURATION ==="
+
+  if [ ! -d "/etc/php" ]; then
+    log_action "PHP not installed (/etc/php not found), skipping"
+    return 0
+  fi
+
+  local PHP_WEB_ROOT="/var/www/html" # default apache web dir
+  local hardened_count=0
+
+  local PHP_DISABLE_FUNCTIONS="exec,passthru,shell_exec,system,proc_open,popen,curl_exec,curl_multi_exec,parse_ini_file,show_source,highlight_file,phpinfo,pcntl_exec,pcntl_fork,pcntl_signal,pcntl_waitpid,pcntl_wexitstatus,pcntl_wifexited,pcntl_wifsignaled,pcntl_wifstopped,pcntl_wstopsig,pcntl_wtermsig,posix_kill,posix_mkfifo,posix_setpgid,posix_setsid,posix_setuid,dl"
+  local PHP_OPEN_BASEDIR="/var/www:/tmp:/usr/share/php:/dev/urandom"
+
+  for version_dir in /etc/php/*/; do
+    local version=$(basename "$version_dir")
+
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+      continue
+    fi
+
+    log_action "Found PHP version: $version"
+
+    for sapi in apache2 fpm cli cgi; do
+      local conf_dir="/etc/php/${version}/${sapi}/conf.d"
+
+      if [ -d "$conf_dir" ]; then
+        local security_file="${conf_dir}/99-cyberpatriot-security.ini"
+        log_action "Hardening PHP ${version} ${sapi}"
+
+        cat > "$security_file" <<EOF
+; CyberPatriot PHP Security Hardening
+expose_php = Off
+display_errors = Off
+display_startup_errors = Off
+log_errors = On
+error_log = /var/log/php_errors.log
+html_errors = Off
+allow_url_fopen = Off
+allow_url_include = Off
+enable_dl = Off
+disable_functions = ${PHP_DISABLE_FUNCTIONS}
+session.cookie_secure = 1
+session.cookie_httponly = 1
+session.use_strict_mode = 1
+session.use_only_cookies = 1
+session.cookie_samesite = Strict
+session.use_trans_sid = 0
+file_uploads = Off
+upload_max_filesize = 2M
+max_file_uploads = 2
+max_execution_time = 30
+max_input_time = 60
+memory_limit = 128M
+post_max_size = 8M
+max_input_vars = 1000
+open_basedir = ${PHP_OPEN_BASEDIR}
+cgi.force_redirect = 1
+cgi.fix_pathinfo = 0
+sql.safe_mode = On
+mail.add_x_header = Off
+zend.assertions = -1
+assert.active = 0
+EOF
+
+        chmod 644 "$security_file"
+        chown root:root "$security_file"
+        ((hardened_count++))
+        log_action "Created security config: $security_file"
+      fi
+    done
+  done
+
+  log_action "Hardended $hardened_count PHP configuration(s)"
+
+  log_action "Searching for phpinfo files..."
+  local phpinfo_patterns=("phpinfo.php" "info.php" "test.php" "pi.php" "php_info.php")
+  local removed_count=0
+
+  if [ -d "$PHP_WEB_ROOT" ]; then
+    for pattern in "${phpinfo_patterns[@]}"; do
+      while IFS= read -r file; do
+        if [ -f "$file" ] && grep -qi "phpinfo\s*(" "$file" 2>/dev/null; then
+          backup_file "$file"
+          rm -f "$file"
+          ((removed_count++))
+          log_action "Removed phpinfo file: $file"
+        fi
+      done < <(find "$PHP_WEB_ROOT" -type f -name "$pattern" 2>/dev/null)
+    done
+  fi
+
+  log_action "Removed $removed_count phpinfo file(s)"
+
+  log_action "Hardening PHP file permissions..."
+  find /etc/php -type f \( -name "php.ini" -o -name "*.ini" \) -exec chown root:root {} \; -exec chmod 644 {} \; 2>/dev/null
+  find /etc/php -type d -exec chown root:root {} \; -exec chmod 755 {} \; 2>/dev/null
+  log_action "PHP config files set to 644 root:root"
+
+  if [ -d "$PHP_WEB_ROOT" ]; then
+    log_action "Hardening web directory permissions..."
+    local web_user="www-data"
+    chown -R "${web_user}:${web_user}" "$PHP_WEB_ROOT" 2>/dev/null
+    find "$PHP_WEB_ROOT" -type d -exec chmod 755 {} \; 2>/dev/null
+    find "$PHP_WEB_ROOT" -type f -exec chmod 644 {} \; 2>/dev/null
+    log_action "Web directory permissions set (dirs=755, files=644)"
+
+    for upload_dir in "${PHP_WEB_ROOT}/uploads" "${PHP_WEB_ROOT}/upload" "${PHP_WEB_ROOT}/files" "${PHP_WEB_ROOT}/media"; do
+      if [ -d "$upload_dir" ]; then
+        chmod 750 "$upload_dir" 2>/dev/null
+        local htaccess="${upload_dir}/.htaccess"
+        if [ ! -f "$htaccess" ]; then
+          cat > "$htaccess" <<'HTACCESS'
+<FilesMatch "\.(?i:php|php3|php4|php5|phtml|pl|py|jsp|asp|sh|cgi)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>
+HTACCESS
+          chmod 644 "$htaccess"
+          chown "${web_user}:${web_user}" "$htaccess"
+          log_action "Created .htaccess in $upload_dir to block script execution"
+        fi
+      fi
+    done
+  fi
+
+  log_action "Reloading PHP services..."
+  for service in $(systemctl list-unit-files 2>/dev/null | grep -o 'php[0-9.]*-fpm\.service'); do
+    if systemctl is-active "$service" &>/dev/null; then
+      systemctl reload "$service" &>/dev/null && log_action "Reloaded $service"
+    fi
+  done
+
+  systemctl is-active apache2 &>/dev/null && systemctl reload apache2 &>/dev/null && log_action "Reloaded apache2"
+  systemctl is-active nginx &>/dev/null && systemctl reload nginx &>/dev/null && log_action "Reloaded nginx"
+
+  log_action "PHP hardening complete"
+}
+
+harden_mysql() {
+  log_action "=== HARDENING MYSQL/MARIADB CONFIGURATION ==="
+
+  if ! command -v mysql &>/dev/null && ! command -v mariadb &>/dev/null; then
+    log_action "MySQL/MariaDB not installed, skipping"
+    return 0
+  fi
+
+  if ! command -v mysqld &>/dev/null && ! systemctl list-unit-files 2>/dev/null | grep -qE 'mysql|mariadb'; then
+    log_action "MySQL/MariaDB server not installed, skipping"
+    return 0
+  fi
+
+  local SERVICE_NAME=""
+  if systemctl list-unit-files 2>/dev/null | grep -qE '^mysql\.service'; then
+    SERVICE_NAME="mysql"
+  elif systemctl list-unit-files 2>/dev/null | grep -qE '^mariadb\.service'; then
+    SERVICE_NAME="mariadb"
+  fi
+
+  run_mysql() {
+    local query="$1"
+    mysql -e "$query" 2>/dev/null || mysql -u root -e "$query" 2>/dev/null
+  }
+
+  log_action "Detecting MySQL configuration paths"
+  local CONFIG_FILE=""
+  for cfg in /etc/mysql/my.cnf /etc/my.cnf /etc/mysql/mysql.conf.d/mysqld.cnf /etc/mysql/mariadb.conf.d/50-server.cnf; do
+    if [ -f "$cfg" ]; then
+      CONFIG_FILE="$cfg"
+      break
+    fi
+  done
+
+  local DATA_DIR="/var/lib/mysql"
+  if [ -d "/var/lib/mariadb" ]; then
+    DATA_DIR="/var/lib/mariadb"
+  fi
+
+  local CONFIG_DIR=""
+  if [ -d "/etc/mysql/mysql.conf.d" ]; then
+    CONFIG_DIR="/etc/mysql/mysql.conf.d"
+  elif [ -d "/etc/mysql/conf.d" ]; then
+    CONFIG_DIR="/etc/mysql/conf.d"
+  else
+    mkdir -p /etc/mysql/conf.d
+    CONFIG_DIR="/etc/mysql/conf.d"
+  fi
+
+  log_action "Creating hardened MySQL configuration"
+  cat > "$CONFIG_DIR/99-security-hardening.cnf" <<'EOF'
+[mysqld]
+# Network Security
+bind-address = 127.0.0.1
+skip-name-resolve = 1
+
+# Run as non-root user
+user = mysql
+
+# Require SSL/TLS for connections
+require_secure_transport = ON
+
+# Disable dangerous features
+local-infile = 0
+symbolic-links = 0
+skip-symbolic-links
+
+# Disable file operations (most secure)
+secure-file-priv = NULL
+
+# Logging
+slow_query_log = 1
+slow_query_log_file = /var/log/mysql/slow.log
+long_query_time = 2
+log_error = /var/log/mysql/error.log
+
+# Connection limits
+max_connections = 100
+max_connect_errors = 10
+connect_timeout = 10
+wait_timeout = 600
+interactive_timeout = 600
+max_allowed_packet = 64M
+
+# Performance
+table_open_cache = 2000
+thread_cache_size = 8
+EOF
+  chmod 644 "$CONFIG_DIR/99-security-hardening.cnf"
+  chown root:root "$CONFIG_DIR/99-security-hardening.cnf"
+  log_action "Created $CONFIG_DIR/99-security-hardening.cnf"
+
+  log_action "Securing MySQL configuration file permissions"
+  if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+    backup_file "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+    chown root:root "$CONFIG_FILE"
+    log_action "Secured $CONFIG_FILE (644, root:root)"
+  fi
+
+  log_action "Securing MySQL data directory"
+  if [ -d "$DATA_DIR" ]; then
+    chown -R mysql:mysql "$DATA_DIR"
+    chmod 750 "$DATA_DIR"
+    log_action "Secured $DATA_DIR (750, mysql:mysql)"
+  fi
+
+  if [ -n "$SERVICE_NAME" ] && systemctl is-active "$SERVICE_NAME" &>/dev/null; then
+    log_action "MySQL is running, performing database-level hardening"
+
+    log_action "Removing anonymous users"
+    if run_mysql "DELETE FROM mysql.user WHERE User = ''; FLUSH PRIVILEGES;" 2>/dev/null; then
+      log_action "Removed anonymous users"
+    else
+      log_action "WARNING: Could not remove anonymous users (may need auth)"
+    fi
+
+    log_action "Disabling remote root login"
+    if run_mysql "DELETE FROM mysql.user WHERE User = 'root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'); FLUSH PRIVILEGES;" 2>/dev/null; then
+      log_action "Disabled remote root login"
+    else
+      log_action "WARNING: Could not disable remote root (may need auth)"
+    fi
+
+    log_action "Removing test database"
+    if run_mysql "DROP DATABASE IF EXISTS test;" 2>/dev/null; then
+      log_action "Removed test database"
+    else
+      log_action "WARNING: Could not remove test database (may need auth)"
+    fi
+
+    log_action "Installing password validation plugin"
+    if run_mysql "INSTALL COMPONENT 'file://component_validate_password';" 2>/dev/null; then
+      log_action "Installed password validation component (MySQL 8+)"
+      run_mysql "SET GLOBAL validate_password.policy = 'STRONG';" 2>/dev/null
+      run_mysql "SET GLOBAL validate_password.length = 12;" 2>/dev/null
+    elif run_mysql "INSTALL PLUGIN validate_password SONAME 'validate_password.so';" 2>/dev/null; then
+      log_action "Installed password validation plugin (legacy)"
+      run_mysql "SET GLOBAL validate_password_policy = 'STRONG';" 2>/dev/null
+    elif run_mysql "INSTALL SONAME 'simple_password_check';" 2>/dev/null; then
+      log_action "Installed simple_password_check (MariaDB)"
+    else
+      log_action "Password validation plugin already installed or unavailable"
+    fi
+
+    log_action "Restarting MySQL to apply configuration"
+    systemctl restart "$SERVICE_NAME" 2>/dev/null || service "$SERVICE_NAME" restart 2>/dev/null
+    if [ $? -eq 0 ]; then
+      log_action "MySQL restarted successfully"
+    else
+      log_action "WARNING: MySQL restart failed, changes apply on next start"
+    fi
+  else
+    log_action "WARNING: MySQL not running, skipping database-level hardening"
+    log_action "Start MySQL and re-run to apply: remove anon users, disable remote root, remove test db, install password validator"
+  fi
+
+  log_action "MySQL hardening complete"
+}
+
+harden_postgresql() {
+  log_action "=== HARDENING POSTGRESQL CONFIGURATION ==="
+
+  if ! command -v psql &>/dev/null; then
+    log_action "PostgreSQL not installed, skipping"
+    return 0
+  fi
+
+  if ! systemctl list-unit-files 2>/dev/null | grep -qE 'postgresql' && ! service --status-all 2>&1 | grep -qE 'postgresql'; then
+    log_action "PostgreSQL service not found, skipping"
+    return 0
+  fi
+
+  log_action "Detecting PostgreSQL version and paths"
+  local PG_VERSION=""
+  for ver in 16 15 14 13 12 11 10; do
+    if [ -d "/etc/postgresql/$ver/main" ]; then
+      PG_VERSION="$ver"
+      break
+    fi
+  done
+
+  if [ -z "$PG_VERSION" ]; then
+    log_action "WARNING: Could not detect PostgreSQL version"
+    return 0
+  fi
+  log_action "Detected PostgreSQL version: $PG_VERSION"
+
+  local PG_CONF=""
+  local PG_HBA=""
+  local PG_DATA=""
+
+  for cfg in "/etc/postgresql/$PG_VERSION/main/postgresql.conf" "/var/lib/postgresql/$PG_VERSION/main/postgresql.conf"; do
+    if [ -f "$cfg" ]; then
+      PG_CONF="$cfg"
+      break
+    fi
+  done
+
+  for hba in "/etc/postgresql/$PG_VERSION/main/pg_hba.conf" "/var/lib/postgresql/$PG_VERSION/main/pg_hba.conf"; do
+    if [ -f "$hba" ]; then
+      PG_HBA="$hba"
+      break
+    fi
+  done
+
+  for data in "/var/lib/postgresql/$PG_VERSION/main" "/var/lib/postgresql"; do
+    if [ -d "$data" ]; then
+      PG_DATA="$data"
+      break
+    fi
+  done
+
+  if [ -z "$PG_CONF" ]; then
+    log_action "WARNING: postgresql.conf not found"
+    return 0
+  fi
+  log_action "Found postgresql.conf: $PG_CONF"
+
+  if [ -z "$PG_HBA" ]; then
+    log_action "WARNING: pg_hba.conf not found"
+    return 0
+  fi
+  log_action "Found pg_hba.conf: $PG_HBA"
+
+  log_action "Hardening postgresql.conf"
+  backup_file "$PG_CONF"
+
+  cat > "$PG_CONF" <<'EOF'
+# === CyberPatriot PostgreSQL Hardening ===
+
+# Connection Security
+listen_addresses = 'localhost'
+port = 5432
+max_connections = 100
+
+# Logging and Auditing
+log_connections = on
+log_disconnections = on
+log_duration = off
+log_line_prefix = '%m [%p] %q%u@%d '
+log_statement = 'ddl'
+log_lock_waits = on
+log_timezone = 'UTC'
+
+# SSL/TLS Configuration
+ssl = on
+ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'
+ssl_key_file = '/etc/ssl/private/ssl-cert-snakeoil.key'
+ssl_prefer_server_ciphers = on
+ssl_min_protocol_version = 'TLSv1.2'
+
+# Authentication
+password_encryption = 'scram-sha-256'
+
+# Security Parameters
+shared_preload_libraries = ''
+fsync = on
+full_page_writes = on
+EOF
+  chmod 644 "$PG_CONF"
+  chown postgres:postgres "$PG_CONF" 2>/dev/null
+  log_action "Created hardened postgresql.conf"
+
+  log_action "Hardening pg_hba.conf"
+  backup_file "$PG_HBA"
+
+  cat > "$PG_HBA" <<'EOF'
+# === CyberPatriot PostgreSQL pg_hba.conf Hardening ===
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+# Local connections (require password, no trust/peer)
+local   all             postgres                                scram-sha-256
+local   all             all                                     scram-sha-256
+
+# IPv4 local connections
+host    all             all             127.0.0.1/32            scram-sha-256
+
+# IPv6 local connections
+host    all             all             ::1/128                 scram-sha-256
+
+# Remote connections - reject non-SSL, allow SSL with auth
+hostnossl   all         all             0.0.0.0/0               reject
+hostssl     all         all             0.0.0.0/0               scram-sha-256
+EOF
+  chmod 640 "$PG_HBA"
+  chown postgres:postgres "$PG_HBA" 2>/dev/null
+  log_action "Created hardened pg_hba.conf (no trust/peer, SSL required for remote)"
+
+  if [ -n "$PG_DATA" ] && [ -d "$PG_DATA" ]; then
+    log_action "Securing PostgreSQL data directory: $PG_DATA"
+    chown -R postgres:postgres "$PG_DATA"
+    chmod 700 "$PG_DATA"
+    find "$PG_DATA" -type d -exec chmod 700 {} \; 2>/dev/null
+    find "$PG_DATA" -type f -exec chmod 600 {} \; 2>/dev/null
+    log_action "Secured data directory (700/600, postgres:postgres)"
+  fi
+
+  log_action "Securing SSL private key"
+  local SSL_KEY="/etc/ssl/private/ssl-cert-snakeoil.key"
+  if [ -f "$SSL_KEY" ]; then
+    chown postgres:postgres "$SSL_KEY" 2>/dev/null || chown root:ssl-cert "$SSL_KEY" 2>/dev/null
+    chmod 600 "$SSL_KEY"
+    log_action "Secured SSL key: $SSL_KEY (600)"
+  fi
+
+  log_action "Verifying PostgreSQL is not running as root"
+  if pgrep -x postgres &>/dev/null; then
+    local PG_USER=$(ps aux | grep -E '[p]ostgres.*main' | awk '{print $1}' | head -n1)
+    if [ "$PG_USER" = "root" ]; then
+      log_action "CRITICAL: PostgreSQL running as root!"
+    elif [ "$PG_USER" = "postgres" ]; then
+      log_action "PostgreSQL running as unprivileged user 'postgres'"
+    else
+      log_action "PostgreSQL running as: $PG_USER"
+    fi
+  fi
+
+  log_action "Reloading PostgreSQL service"
+  local SERVICE_NAME=""
+  if systemctl list-unit-files 2>/dev/null | grep -q '^postgresql\.service'; then
+    SERVICE_NAME="postgresql"
+  elif systemctl list-unit-files 2>/dev/null | grep -qE '^postgresql@'; then
+    SERVICE_NAME=$(systemctl list-unit-files | grep -E '^postgresql@' | head -n1 | awk '{print $1}')
+  fi
+
+  if [ -n "$SERVICE_NAME" ] && systemctl is-active "$SERVICE_NAME" &>/dev/null; then
+    if systemctl reload "$SERVICE_NAME" 2>/dev/null; then
+      log_action "PostgreSQL reloaded successfully"
+    elif systemctl restart "$SERVICE_NAME" 2>/dev/null; then
+      log_action "PostgreSQL restarted successfully"
+    else
+      log_action "WARNING: Could not reload PostgreSQL"
+    fi
+  else
+    log_action "PostgreSQL not running, changes apply on next start"
+  fi
+
+  log_action "Validating PostgreSQL connectivity"
+  if command -v pg_isready &>/dev/null; then
+    if pg_isready -h localhost -p 5432 &>/dev/null; then
+      log_action "PostgreSQL accepting connections on port 5432"
+    else
+      log_action "PostgreSQL not responding (may not be running)"
+    fi
+  fi
+
+  log_action "PostgreSQL hardening complete"
+  log_action "NOTE: Set postgres password with: sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'STRONG_PASSWORD';\""
+}
+
+harden_samba() {
+  log_action "=== HARDENING SAMBA CONFIGURATION ==="
+
+  if ! command -v smbd &>/dev/null; then
+    log_action "Samba not installed, skipping"
+    return 0
+  fi
+
+  local SMB_CONF=""
+  for cfg in /etc/samba/smb.conf /etc/smb.conf /usr/local/samba/lib/smb.conf; do
+    if [ -f "$cfg" ]; then
+      SMB_CONF="$cfg"
+      break
+    fi
+  done
+
+  if [ -z "$SMB_CONF" ]; then
+    log_action "WARNING: smb.conf not found"
+    return 0
+  fi
+  log_action "Found smb.conf: $SMB_CONF"
+
+  log_action "Backing up Samba configuration"
+  backup_file "$SMB_CONF"
+
+  log_action "Extracting existing share definitions"
+  local EXISTING_SHARES=""
+  if [ -f "$SMB_CONF" ]; then
+    EXISTING_SHARES=$(awk '/^\[.+\]$/ && !/^\[global\]$/ {p=1} p' "$SMB_CONF")
+  fi
+
+  log_action "Creating hardened smb.conf"
+  cat > "$SMB_CONF" <<'EOF'
+# === CyberPatriot Samba Security Hardening ===
+
+[global]
+# Basic Settings
+workgroup = WORKGROUP
+server string = Samba Server %v
+netbios name = FILESERVER
+
+# CRITICAL: Protocol Security - Disable SMBv1 (WannaCry protection)
+server min protocol = SMB2
+client min protocol = SMB2
+server max protocol = SMB3
+
+# CRITICAL: Encryption - Require for all connections
+smb encrypt = required
+
+# CRITICAL: Authentication
+security = user
+map to guest = never
+guest account = nobody
+ntlm auth = disabled
+lanman auth = no
+encrypt passwords = yes
+passdb backend = tdbsam
+
+# CRITICAL: SMB Signing - Prevent packet tampering
+server signing = mandatory
+client signing = mandatory
+
+# CRITICAL: Anonymous Access Prevention
+restrict anonymous = 2
+null passwords = no
+
+# Network Access Control
+hosts allow = 127.0.0.1 10.0.0.0/8 192.168.0.0/16 172.16.0.0/12
+hosts deny = 0.0.0.0/0
+
+# Logging
+log level = 2
+log file = /var/log/samba/log.%m
+max log size = 1000
+
+# Auditing
+vfs objects = acl_xattr full_audit
+full_audit:prefix = %u|%I|%m|%S
+full_audit:failure = connect
+full_audit:success = connect disconnect opendir mkdir rmdir open close read write rename unlink chmod chown
+
+# Connection Limits
+max connections = 100
+deadtime = 15
+socket options = TCP_NODELAY IPTOS_LOWDELAY
+
+# Disable Printer Sharing
+load printers = no
+printing = bsd
+printcap name = /dev/null
+disable spoolss = yes
+
+# Disable Master Browser
+domain master = no
+local master = no
+preferred master = no
+wins support = no
+dns proxy = no
+
+# File System
+use sendfile = yes
+map acl inherit = yes
+store dos attributes = yes
+
+EOF
+
+  if [ -n "$EXISTING_SHARES" ]; then
+    log_action "Restoring existing share definitions"
+    echo "" >> "$SMB_CONF"
+    echo "# === Existing Shares ===" >> "$SMB_CONF"
+    echo "$EXISTING_SHARES" >> "$SMB_CONF"
+  fi
+
+  cat >> "$SMB_CONF" <<'EOF'
+
+# === Secure Share Template (Example) ===
+# [secure_share]
+# comment = Secure File Share
+# path = /srv/samba/secure_share
+# browseable = no
+# guest ok = no
+# read only = yes
+# write list = @samba_admins
+# valid users = @samba_users
+# create mask = 0660
+# directory mask = 2770
+# force group = samba_users
+EOF
+
+  log_action "Securing Samba file permissions"
+  chown root:root "$SMB_CONF"
+  chmod 644 "$SMB_CONF"
+
+  if [ -d /etc/samba ]; then
+    chown -R root:root /etc/samba
+    chmod 755 /etc/samba
+  fi
+
+  if [ -d /var/lib/samba/private ]; then
+    chmod 700 /var/lib/samba/private
+    chown root:root /var/lib/samba/private
+    log_action "Secured /var/lib/samba/private (700)"
+  fi
+
+  log_action "Creating samba_users group"
+  if ! getent group samba_users &>/dev/null; then
+    groupadd samba_users
+    log_action "Created 'samba_users' group"
+  else
+    log_action "Group 'samba_users' already exists"
+  fi
+
+  log_action "Validating Samba configuration"
+  if command -v testparm &>/dev/null; then
+    if testparm -s "$SMB_CONF" &>/dev/null; then
+      log_action "Samba configuration is valid"
+    else
+      log_action "WARNING: Samba configuration has errors"
+      testparm -s "$SMB_CONF" 2>&1 | head -20
+    fi
+  fi
+
+  log_action "Restarting Samba services"
+  local RESTARTED=0
+  if systemctl is-active smbd &>/dev/null || systemctl is-enabled smbd &>/dev/null; then
+    systemctl restart smbd 2>/dev/null && RESTARTED=1 && log_action "Restarted smbd"
+  fi
+  if systemctl is-active nmbd &>/dev/null || systemctl is-enabled nmbd &>/dev/null; then
+    systemctl restart nmbd 2>/dev/null && log_action "Restarted nmbd"
+  fi
+  if systemctl is-active samba &>/dev/null || systemctl is-enabled samba &>/dev/null; then
+    systemctl restart samba 2>/dev/null && RESTARTED=1 && log_action "Restarted samba"
+  fi
+
+  if [ "$RESTARTED" -eq 0 ]; then
+    log_action "Samba services not running, changes apply on next start"
+  fi
+
+  log_action "Samba hardening complete"
+  log_action "Security applied: SMBv1 disabled, encryption required, guest disabled, NTLMv1 disabled, signing mandatory"
+  log_action "Next steps: Add users with 'smbpasswd -a <user>' and 'usermod -aG samba_users <user>'"
 }
 
 #===============================================
@@ -1393,41 +4057,57 @@ main() {
   log_action ""
 
   log_action "[ PHASE 1: SYSTEM UPDATES ]"
-  update_system
   configure_automatic_updates
-  enable_auto_update_refresh
+  update_system
+  install_security_dependencies
   log_action ""
 
   log_action "[ PHASE 2: USER & GROUP MANAGEMENT ]"
   remove_unauthorized_users
   fix_admin_group
   check_uid_zero
+  check_group_sudo_privileges
   disable_guest
   set_all_user_passwords
   lock_root_account
   log_action ""
 
   log_action "[ PHASE 3: PASSWORD POLICIES ]"
-  disallow_empty_passwords
+  configure_account_lockout
   configure_pam
+  disallow_empty_passwords
   set_password_aging
   log_action ""
 
   log_action "[ PHASE 4: FILE PERMISSIONS & SECURITY ]"
   secure_file_permissions
+  verify_file_permissions
   fix_sudoers_nopasswd
   find_world_writable_files
   check_suid_sgid
   find_orphaned_files
   log_action ""
 
-  log_action "[ PHASE 5: NETWORK SECURITY ]"
+  # log_action "[ PHASE 5: NETWORK SECURITY ]"
+  log_action "[ PHASE 5: OS SYSTEM HARDENING ]"
   fix_hosts_file
   harden_ssh
   harden_kernel_sysctl
+  verify_sysctl_settings
+  harden_grub
+  remove_rbash
+  enforce_umask
+  secure_home_directories
+  secure_tmp_mount
+  secure_dev_shm
+  setup_proc_hidepid
+  configure_host_conf
+  configure_screen_security
+  disable_xserver_tcp
+  validate_gdm3_config #helper
   log_action ""
 
-  log_action "[ PHASE 6: FIREWALL ]"
+  log_action "[ PHASE 6: DEFENSIVE COUNTERMEASURES ]"
   configure_firewall
   log_action ""
 
@@ -1441,20 +4121,31 @@ main() {
   remove_prohibited_media
   log_action ""
 
-  log_action "[ PHASE 9: CRON SECURITY ]"
-  secure_cron_system
+  log_action "[ PHASE 9: SERVICE HARDENING ]"
+  harden_vsftp
+  harden_apache
+  harden_nginx
+  harden_php
+  harden_mysql
+  harden_postgresql
+  harden_samba
   log_action ""
 
-  log_action "[ PHASE 10: SYSTEM AUDITING ]"
-  harden_auditd
-  enable_app_armor
+  log_action "[ PHASE 10: CRON SECURITY ]"
+  secure_cron_system
   log_action ""
 
   log_action "[ PHASE 11: MALWARE DETECTION ]"
   run_rootkit_scans
   log_action ""
 
-  log_action "[ PHASE 12: LYNIS AUDIT ]"
+  log_action "[ PHASE 12: SYSTEM AUDITING ]"
+  harden_auditd
+  enable_app_armor
+  log_action ""
+
+  # 12. COMPREHENSIVE SECURITY AUDIT
+  log_action "[ PHASE 13: LYNIS AUDIT ]"
   audit_with_lynis
   log_action ""
 

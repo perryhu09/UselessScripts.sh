@@ -1,0 +1,7 @@
+A suspicious file named generator.sh has been downloaded onto the system. Please find the URL from which this file has been downloaded, and please find the hidden secret inside the website.
+
+Example Answer: https://funnywebsite.com
+Example Answer: Cybersecurity is the best club!
+
+Answer: 
+Answer: 

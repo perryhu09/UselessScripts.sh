@@ -1,0 +1,3 @@
+Fred has installed another web browser in attempt to use it for remote access. 
+What is the fedora package name for this other browser that's installed?
+ANSWER: 

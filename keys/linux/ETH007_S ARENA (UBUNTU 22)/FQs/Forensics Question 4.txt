@@ -1,0 +1,14 @@
+This is a forensics question. Answer it below.
+
+EXAMPLE: What is 40 + 2?
+EXAMPLE ANSWER: 42
+
+---------------------------------------------
+
+The user "joy" has an SSH private key configured, located at /home/joy/.ssh/id_rsa. The corresponding public key is located at /home/joy/.ssh/id_rsa.pub.
+
+What is the modulus of the SSH key? Give your answer in hex, with no "0x" prefix, all lowercase. (note: your answer will be much longer than the below example)
+
+EXAMPLE: 164dcff77a4d7591ad3df7967e4727e527ba95b9a8109079f10f7263584cf5f9183c232195d24bce4
+
+ANSWER: 

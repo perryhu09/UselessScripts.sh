@@ -1,0 +1,14 @@
+This is a forensics question. Answer it below.
+
+EXAMPLE: What is 40 + 2?
+EXAMPLE ANSWER: 42
+
+---------------------------------------------
+
+There is a secret message hidden in the file secret.txt, located on your Desktop.
+
+What is the message?
+
+EXAMPLE: To the moon!
+
+ANSWER: 

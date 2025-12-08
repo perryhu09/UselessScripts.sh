@@ -1,0 +1,8 @@
+SSH keys are sensitive information and should be protected. They're usually 
+found in a users home directory under a subdirectory called .ssh. These should 
+be protected by file permissions restricting access only to the user. 
+Additionally, authorized_keys is a file that contains public keys that are 
+authorized to log in as a user. This file should also be protected so that an 
+attacker can't add their own public key. What is the uid of the owner of fred's 
+ssh private key?
+ANSWER:

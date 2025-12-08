@@ -1,0 +1,3 @@
+The hacker who gained access to this computer appended an insecure line in a critical file for sudo permissions. What is that line? (You should probably delete it after you find it).
+
+Answer: 

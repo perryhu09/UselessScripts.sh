@@ -1,0 +1,24 @@
+Despite recent attempts to annihilate the demons from this world, they are still roaming around. We have received information that the enemy infiltrated our systems and placed a file. Please return with the following information about the file:
+
+What is the file extension of the file? All lowercase and include a period.
+Ex: .mp4
+
+ANSWER:
+------------------------------------------------------------------------------------------------
+
+Where did this file extension originate from? All lowercase, no spaces.
+Ex: github
+
+ANSWER:
+------------------------------------------------------------------------------------------------
+
+What is the full path of the file?
+Ex: /home/tanjiro/Desktop/FQ1.txt
+
+ANSWER:
+------------------------------------------------------------------------------------------------
+
+What is the flag hidden in the file?
+Ex: flag{answer_goes_here_but_include_"flag"}
+
+ANSWER:

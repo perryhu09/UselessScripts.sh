@@ -1,0 +1,5 @@
+There is a source code editor installed on this computer. Find the release key fingerprint of this source code editor (1). Next find the key type (2) and the date the key expires (3) in the format YYYY-MM-DD.
+
+Answer: 
+Answer: 
+Answer: 
