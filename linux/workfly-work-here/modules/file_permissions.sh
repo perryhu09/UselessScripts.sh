@@ -1,12 +1,13 @@
 #!/bin/bash
-# prohibited_files.sh - File Permissions and Prohibited Files
+# file_permissions.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 
-# Module: File Permissions and Prohibited Files
+# Module: File Permissions
 # Category: File Security
-# Description: File Permissions and Prohibited Files
+# Description: File Permissions 
+
 secure_file_permissions() {
   log_action "=== SECURING FILE PERMISSIONS ==="
 
@@ -849,70 +850,8 @@ find_orphaned_files() {
   done < <(find / "${exclude_paths[@]}" \( -nouser -o -nogroup \) -print 2>/dev/null)
 }
 
-remove_prohibited_media() {
-  log_action "=== SCANNING FOR PROHIBITED MEDIA FILES ==="
-
-  MEDIA_EXTENSIONS=(
-      # Audio formats
-      "*.mp3"
-      "*.ogg"
-      "*.wav"
-      "*.m4a"
-      "*.aac"
-      "*.wma"
-      "*.flac"
-      
-      # Video formats
-      "*.mp4"
-      "*.avi"
-      "*.mkv"
-      "*.mov"
-      "*.flv"
-      "*.wmv"
-      "*.webm"
-      "*.mpeg"
-      "*.mpg"
-      "*.3gp"
-      
-      # Archive formats (for prohibited software)
-      "*.zip"
-      "*.tar"
-      "*.tar.gz"
-      "*.tgz"
-      "*.rar"
-      "*.7z"
-      "*.bz2"
-      "*.xz"
-      
-      # Image formats (sometimes prohibited)
-      "*.jpg"
-      "*.jpeg"
-      "*.png"
-      "*.gif"
-      "*.bmp"
-      "*.tiff"
-      "*.webp"
-      
-      # Other suspicious files
-      "*.flag"
-      "*.torrent"
-  )
-
-  log_action "NOTE: MAKE SURE TO MANUALLY REVIEW THIS SECTION"
-  log_action ""
-  for ext in "${MEDIA_EXTENSIONS[@]}"; do
-    find /home -type f -name "$ext" 2>/dev/null | while read file; do
-      log_action "PROHIBITED MEDIA FOUND: $file"
-      # rm -f "$file"
-    done
-  done
-
-  log_action "Possible prohibited media found (NOT REMOVED)"
-}
-
-# Main runner
-run_prohibited_files() {
-    log_section "Starting Prohibited Files Check"
+run_file_permissions() {
+    log_section "File Perms Check"
     secure_file_permissions
     verify_critical_file_permissions
     fix_sudoers_nopasswd
@@ -920,7 +859,7 @@ run_prohibited_files() {
     check_suid_sgid
     find_orphaned_files
 
-    log_success "Prohibited Files check completed"
+    log_success "File Perms check completed"
 }
 
-export -f run_prohibited_files
+export -f run_file_permissions

@@ -65,73 +65,12 @@ remove_unauthorized_software() {
 }
 
 # Implement another function for auditing installed packages?
-
-remove_prohibited_media() {
-  log_action "=== SCANNING FOR PROHIBITED MEDIA FILES ==="
-
-  MEDIA_EXTENSIONS=(
-      # Audio formats
-      "*.mp3"
-      "*.ogg"
-      "*.wav"
-      "*.m4a"
-      "*.aac"
-      "*.wma"
-      "*.flac"
-      
-      # Video formats
-      "*.mp4"
-      "*.avi"
-      "*.mkv"
-      "*.mov"
-      "*.flv"
-      "*.wmv"
-      "*.webm"
-      "*.mpeg"
-      "*.mpg"
-      "*.3gp"
-      
-      # Archive formats (for prohibited software)
-      "*.zip"
-      "*.tar"
-      "*.tar.gz"
-      "*.tgz"
-      "*.rar"
-      "*.7z"
-      "*.bz2"
-      "*.xz"
-      
-      # Image formats (sometimes prohibited)
-      "*.jpg"
-      "*.jpeg"
-      "*.png"
-      "*.gif"
-      "*.bmp"
-      "*.tiff"
-      "*.webp"
-      
-      # Other suspicious files
-      "*.flag"
-      "*.torrent"
-  )
-
-  log_action "NOTE: MAKE SURE TO MANUALLY REVIEW THIS SECTION"
-  log_action ""
-  for ext in "${MEDIA_EXTENSIONS[@]}"; do
-    find /home -type f -name "$ext" 2>/dev/null | while read file; do
-      log_action "PROHIBITED MEDIA FOUND: $file"
-      # rm -f "$file"
-    done
-  done
-
-  log_action "Possible prohibited media found (NOT REMOVED)"
-}
+# ^^ yes will be audited by AI
 
 # Main runner
 run_unwanted_software() {
     log_section "Starting Unwanted Software Removal"
     remove_unauthorized_software "$@"
-    remove_prohibited_media
     log_success "Unwanted Software Removal completed"
 }
 
