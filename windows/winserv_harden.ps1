@@ -31,12 +31,15 @@ function Manage-UsersAndGroups {
             1 {
                 if ($domainJoined) {
                     Write-Host "`n--- Domain Users ---"
-                    Get-ADUser -Filter * | Select-Object SamAccountName, Enabled | Format-Table
+                    # Show some useful columns and don't let the menu immediately clear the output
+                    Get-ADUser -Filter * -Properties Enabled |
+                        Select-Object SamAccountName, Enabled |
+                        Format-Table -AutoSize
                 } else {
                     Write-Host "`n--- Local Users ---"
-                    Get-LocalUser | Format-Table Name, Enabled
+                    Get-LocalUser | Select-Object Name, Enabled | Format-Table -AutoSize
                 }
-                
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             2 {
@@ -44,35 +47,52 @@ function Manage-UsersAndGroups {
                 $password = Read-Host "Enter password" -AsSecureString
 
                 if ($domainJoined) {
-                    New-ADUser -Name $userName -SamAccountName $userName -AccountPassword $password -Enabled $true
-                    Write-Host "✅ Domain user '$userName' created."
+                    try {
+                        New-ADUser -Name $userName -SamAccountName $userName -AccountPassword $password -Enabled $true -ErrorAction Stop
+                        Write-Host "✅ Domain user '$userName' created."
+                    } catch {
+                        Write-Host "Error creating domain user: $($_.Exception.Message)"
+                    }
                 } else {
-                    New-LocalUser -Name $userName -Password $password -FullName $userName -Description "Created by hardening script"
-                    Write-Host "✅ Local user '$userName' created."
+                    try {
+                        New-LocalUser -Name $userName -Password $password -FullName $userName -Description "Created by hardening script" -ErrorAction Stop
+                        Write-Host "✅ Local user '$userName' created."
+                    } catch {
+                        Write-Host "Error creating local user: $($_.Exception.Message)"
+                    }
                 }
-                
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             3 {
                 $userName = Read-Host "Enter username to remove"
                 if ($domainJoined) {
-                    Remove-ADUser -Identity $userName -Confirm:$false
+                    try {
+                        Remove-ADUser -Identity $userName -Confirm:$false -ErrorAction Stop
+                        Write-Host "User '$userName' removed from domain."
+                    } catch {
+                        Write-Host "Error removing domain user: $($_.Exception.Message)"
+                    }
                 } else {
-                    Remove-LocalUser -Name $userName
+                    try {
+                        Remove-LocalUser -Name $userName -ErrorAction Stop
+                        Write-Host "Local user '$userName' removed."
+                    } catch {
+                        Write-Host "Error removing local user: $($_.Exception.Message)"
+                    }
                 }
-                Write-Host "User '$userName' removed."
-                
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             4 {
                 if ($domainJoined) {
                     Write-Host "`n--- Domain Groups ---"
-                    Get-ADGroup -Filter * | Select-Object Name, GroupScope | Format-Table
+                    Get-ADGroup -Filter * | Select-Object Name, GroupScope | Format-Table -AutoSize
                 } else {
                     Write-Host "`n--- Local Groups ---"
-                    Get-LocalGroup | Format-Table Name
+                    Get-LocalGroup | Select-Object Name | Format-Table -AutoSize
                 }
-                
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             5 {
@@ -80,60 +100,109 @@ function Manage-UsersAndGroups {
                 if ($domainJoined) {
                     $scopeChoice = Read-Host "Enter group scope (Global / Universal / DomainLocal, default = Global)"
                     if (-not $scopeChoice) { $scopeChoice = "Global" }
-                    New-ADGroup -Name $groupName -GroupScope $scopeChoice -GroupCategory Security
-                    Write-Host "Domain group '$groupName' ($scopeChoice) created."
+                    try {
+                        New-ADGroup -Name $groupName -GroupScope $scopeChoice -GroupCategory Security -ErrorAction Stop
+                        Write-Host "Domain group '$groupName' ($scopeChoice) created."
+                    } catch {
+                        Write-Host "Error creating domain group: $($_.Exception.Message)"
+                    }
                 } else {
-                    New-LocalGroup -Name $groupName -Description "Created by hardening script"
-                    Write-Host "Local group '$groupName' created."
+                    try {
+                        New-LocalGroup -Name $groupName -Description "Created by hardening script" -ErrorAction Stop
+                        Write-Host "Local group '$groupName' created."
+                    } catch {
+                        Write-Host "Error creating local group: $($_.Exception.Message)"
+                    }
                 }
-                
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             6 {
                 $groupName = Read-Host "Enter group name to remove"
                 if ($domainJoined) {
-                    Remove-ADGroup -Identity $groupName -Confirm:$false
+                    try {
+                        Remove-ADGroup -Identity $groupName -Confirm:$false -ErrorAction Stop
+                        Write-Host "Domain group '$groupName' removed."
+                    } catch {
+                        Write-Host "Error removing domain group: $($_.Exception.Message)"
+                    }
                 } else {
-                    Remove-LocalGroup -Name $groupName
+                    try {
+                        Remove-LocalGroup -Name $groupName -ErrorAction Stop
+                        Write-Host "Local group '$groupName' removed."
+                    } catch {
+                        Write-Host "Error removing local group: $($_.Exception.Message)"
+                    }
                 }
-                Write-Host "Group '$groupName' removed."
-                
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             7 {
                 $userName = Read-Host "Enter username"
                 $groupName = Read-Host "Enter group name"
 
-                if ($domainJoined) {
-                    Add-ADGroupMember -Identity $groupName -Members $userName
-                } else {
-                    Add-LocalGroupMember -Group $groupName -Member $userName
+                try {
+                    if ($domainJoined) {
+                        Add-ADGroupMember -Identity $groupName -Members $userName -ErrorAction Stop
+                    } else {
+                        Add-LocalGroupMember -Group $groupName -Member $userName -ErrorAction Stop
+                    }
+                    Write-Host "Added '$userName' to '$groupName'."
+                } catch {
+                    Write-Host "Error adding user to group: $($_.Exception.Message)"
                 }
-                Write-Host "Added '$userName' to '$groupName'."
-                
+
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             8 {
                 $userName = Read-Host "Enter username"
                 $groupName = Read-Host "Enter group name"
 
-                if ($domainJoined) {
-                    Remove-ADGroupMember -Identity $groupName -Members $userName -Confirm:$false
-                } else {
-                    Remove-LocalGroupMember -Group $groupName -Member $userName
+                try {
+                    if ($domainJoined) {
+                        Remove-ADGroupMember -Identity $groupName -Members $userName -Confirm:$false -ErrorAction Stop
+                    } else {
+                        Remove-LocalGroupMember -Group $groupName -Member $userName -ErrorAction Stop
+                    }
+                    Write-Host "Removed '$userName' from '$groupName'."
+                } catch {
+                    Write-Host "Error removing user from group: $($_.Exception.Message)"
                 }
-                Write-Host "Removed '$userName' from '$groupName'."
-                
+
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             10 {
                 # Manage a single group: add/remove multiple users separated by commas
                 $groupName = Read-Host "Enter the target group name"
-                $action = Read-Host "Enter action ('add' or 'remove')"
 
+                # Show current members first
+                Write-Host "`nCurrent members of '$groupName':"
+                try {
+                    if ($domainJoined) {
+                        $members = Get-ADGroupMember -Identity $groupName -Recursive -ErrorAction Stop | Select-Object -ExpandProperty SamAccountName -ErrorAction SilentlyContinue
+                        if ($members) {
+                            $members | ForEach-Object { Write-Host " - $_" }
+                        } else {
+                            Write-Host " (no members or group not found)"
+                        }
+                    } else {
+                        $members = Get-LocalGroupMember -Group $groupName -ErrorAction Stop | Select-Object -ExpandProperty Name -ErrorAction SilentlyContinue
+                        if ($members) {
+                            $members | ForEach-Object { Write-Host " - $_" }
+                        } else {
+                            Write-Host " (no members or group not found)"
+                        }
+                    }
+                } catch {
+                    Write-Host "Unable to enumerate members: $($_.Exception.Message)"
+                }
+
+                $action = Read-Host "Enter action ('add' or 'remove')"
                 if ($action -notin @('add','remove')) {
                     Write-Host "Invalid action. Use 'add' or 'remove'."
-                    
+                    Read-Host "`nPress Enter to return to menu..."
                     break
                 }
 
@@ -142,42 +211,43 @@ function Manage-UsersAndGroups {
 
                 if ($users.Count -eq 0) {
                     Write-Host "No valid usernames provided."
-                    
+                    Read-Host "`nPress Enter to return to menu..."
                     break
                 }
 
                 try {
                     if ($domainJoined) {
                         if ($action -eq 'add') {
-                            Add-ADGroupMember -Identity $groupName -Members $users
+                            Add-ADGroupMember -Identity $groupName -Members $users -ErrorAction Stop
                             Write-Host "Added users to domain group '$groupName': $($users -join ', ')"
                         } else {
-                            Remove-ADGroupMember -Identity $groupName -Members $users -Confirm:$false
+                            Remove-ADGroupMember -Identity $groupName -Members $users -Confirm:$false -ErrorAction Stop
                             Write-Host "Removed users from domain group '$groupName': $($users -join ', ')"
                         }
                     } else {
                         if ($action -eq 'add') {
-                            Add-LocalGroupMember -Group $groupName -Member $users
+                            Add-LocalGroupMember -Group $groupName -Member $users -ErrorAction Stop
                             Write-Host "Added users to local group '$groupName': $($users -join ', ')"
                         } else {
-                            Remove-LocalGroupMember -Group $groupName -Member $users -Confirm:$false
+                            Remove-LocalGroupMember -Group $groupName -Member $users -Confirm:$false -ErrorAction Stop
                             Write-Host "Removed users from local group '$groupName': $($users -join ', ')"
                         }
                     }
                 } catch {
-                    Write-Host "Error processing group membership changes:`n$_"
+                    Write-Host "Error processing group membership changes:`n$($_.Exception.Message)"
                 }
-                
+
+                Read-Host "`nPress Enter to return to menu..."
             }
 
             9 {
                 Write-Host "Exiting user management..."
-                break; 
+                break;
             }
 
             Default {
                 Write-Host "Invalid selection. Try again."
-                
+                Read-Host "`nPress Enter to return to menu..."
             }
         }
     } until ($choice -eq "9")
