@@ -76,6 +76,59 @@ command_exists() {
     command -v "$1" &>/dev/null
 }
 
+# Ensure required dependencies are installed
+check_dependencies() {
+    local missing=()
+
+    for cmd in "$@"; do
+        if ! command_exists "$cmd"; then
+            missing+=("$cmd")
+        fi
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log_error "Missing required dependencies: ${missing[*]}"
+        log_info "Install them with: sudo apt-get install ${missing[*]}"
+        return 1
+    fi
+
+    return 0
+}
+
+# Detect OS distribution
+detect_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        echo "$ID"
+    else
+        echo "unknown"
+    fi
+}
+
+# Detect OS version
+detect_os_version() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        echo "$VERSION_ID"
+    else
+        echo "unknown"
+    fi
+}
+
+# Check if OS is supported
+is_supported_os() {
+    local os=$(detect_os)
+    local version=$(detect_os_version)
+
+    if [[ "$os" == "linuxmint" && "$version" == "21"* ]]; then
+        return 0
+    elif [[ "$os" == "ubuntu" && "$version" == "24."* ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 backup_file() {
   if [ -f "$1" ]; then
     cp "$1" "$1.bak.$(date +%s)"
@@ -89,4 +142,6 @@ get_timestamp() {
 
 # Export functions
 export -f log_debug log_info log_warn log_error log_success log_section log_action
-export -f require_root command_exists backup_file get_timestamp
+export -f require_root command_exists check_dependencies
+export -f detect_os detect_os_version is_supported_os
+export -f backup_file get_timestamp

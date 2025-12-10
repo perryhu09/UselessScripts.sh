@@ -17,10 +17,33 @@ source "$ENGINE_DIR/lib/utils.sh"
 # Require root
 require_root
 
+# Check system compatibility
+check_system() {
+    log_section "System Check"
+
+    local os=$(detect_os)
+    local version=$(detect_os_version)
+
+    log_info "Operating System: $os"
+    log_info "OS Version: $version"
+
+    if ! is_supported_os; then
+        log_warn "This OS may not be fully supported"
+        log_warn "Supported: Linux Mint 21.x, Ubuntu 24.x"
+    else
+        log_success "OS is supported"
+    fi
+}
+
 # Banner
 echo "======================================"
-echo " Ubuntu Security Hardening Engine"
+echo " Security Hardening Engine"
+echo " OS: $(detect_os) $(detect_os_version)"
 echo "======================================"
+echo ""
+
+# Check system
+check_system
 echo ""
 
 # Discover all modules

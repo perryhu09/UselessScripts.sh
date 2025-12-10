@@ -70,7 +70,7 @@ remove_unauthorized_software() {
 # Main runner
 run_unwanted_software() {
     log_section "Starting Unwanted Software Removal"
-    remove_unauthorized_software "$@"
+    remove_unauthorized_software "$SCRIPT_DIR/../package_blacklist.txt"
     log_success "Unwanted Software Removal completed"
 }
 
