@@ -1037,6 +1037,351 @@ function stop-DefaultSharedFolders {
     Write-Host "Operation complete. Verify Shares in Computer Management -> Shared Folders if needed."
 }
 
+function Configure-UserRightsAssignments {
+    # Require elevation
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "This operation requires administrative privileges. Re-run in an elevated session." -ForegroundColor Red
+        return
+    }
+
+    Write-Host "Configuring User Rights Assignments for secure settings..." -ForegroundColor Cyan
+
+    # Create temporary security template file
+    $secEditPath = "$env:TEMP\secedit_ura_$(Get-Random).inf"
+    $secDbPath = "$env:TEMP\secedit_db_$(Get-Random).sdb"
+    $logPath = "$env:TEMP\secedit_log_$(Get-Random).txt"
+
+    # Define User Rights Assignments - Using proper account names instead of just SIDs
+    $userRightsConfig = @"
+[Unicode]
+Unicode=yes
+[Version]
+signature="`$CHICAGO`$"
+Revision=1
+[Privilege Rights]
+SeTrustedCredManAccessPrivilege = 
+SeNetworkLogonRight = *S-1-5-32-544
+SeTcbPrivilege = 
+SeIncreaseQuotaPrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20
+SeInteractiveLogonRight = *S-1-5-32-544,*S-1-5-32-545
+SeRemoteInteractiveLogonRight = *S-1-5-32-544,*S-1-5-32-555
+SeBackupPrivilege = *S-1-5-32-544
+SeSystemtimePrivilege = *S-1-5-32-544,*S-1-5-19
+SeTimeZonePrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-32-545
+SeCreatePagefilePrivilege = *S-1-5-32-544
+SeCreateTokenPrivilege = 
+SeCreateGlobalPrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20,*S-1-5-6
+SeCreatePermanentPrivilege = 
+SeCreateSymbolicLinkPrivilege = *S-1-5-32-544
+SeDebugPrivilege = *S-1-5-32-544
+SeDenyNetworkLogonRight = *S-1-5-32-546,*S-1-5-113
+SeDenyBatchLogonRight = *S-1-5-32-546
+SeDenyServiceLogonRight = *S-1-5-32-546
+SeDenyInteractiveLogonRight = *S-1-5-32-546
+SeDenyRemoteInteractiveLogonRight = *S-1-5-32-546,*S-1-5-113
+SeEnableDelegationPrivilege = 
+SeRemoteShutdownPrivilege = *S-1-5-32-544
+SeAuditPrivilege = *S-1-5-19,*S-1-5-20
+SeImpersonatePrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20,*S-1-5-6
+SeIncreaseBasePriorityPrivilege = *S-1-5-32-544
+SeLoadDriverPrivilege = *S-1-5-32-544
+SeLockMemoryPrivilege = 
+SeBatchLogonRight = *S-1-5-32-544
+SeServiceLogonRight = 
+SeSecurityPrivilege = *S-1-5-32-544
+SeRelabelPrivilege = 
+SeSystemEnvironmentPrivilege = *S-1-5-32-544
+SeManageVolumePrivilege = *S-1-5-32-544
+SeProfileSingleProcessPrivilege = *S-1-5-32-544
+SeSystemProfilePrivilege = *S-1-5-32-544,*S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420
+SeAssignPrimaryTokenPrivilege = *S-1-5-19,*S-1-5-20
+SeRestorePrivilege = *S-1-5-32-544
+SeShutdownPrivilege = *S-1-5-32-544,*S-1-5-32-545
+SeTakeOwnershipPrivilege = *S-1-5-32-544
+"@
+
+    try {
+        # Write configuration to temp file
+        Write-Host "Creating security template..." -ForegroundColor Yellow
+        $userRightsConfig | Out-File -FilePath $secEditPath -Encoding unicode -Force
+
+        # Verify file was created
+        if (-not (Test-Path $secEditPath)) {
+            throw "Failed to create security template file"
+        }
+
+        Write-Host "Applying User Rights Assignments via secedit..." -ForegroundColor Yellow
+        Write-Host "Template: $secEditPath" -ForegroundColor Gray
+        Write-Host "This may take 30-60 seconds..." -ForegroundColor Yellow
+        Write-Host ""
+
+        # Apply the security template with verbose output
+        $seceditArgs = @(
+            "/configure"
+            "/db", $secDbPath
+            "/cfg", $secEditPath
+            "/areas", "USER_RIGHTS"
+            "/log", $logPath
+            "/overwrite"
+        )
+        
+        $process = Start-Process -FilePath "secedit.exe" -ArgumentList $seceditArgs -Wait -PassThru -NoNewWindow
+        
+        Write-Host ""
+        
+        # Check the log file for details
+        if (Test-Path $logPath) {
+            $logContent = Get-Content $logPath -Raw
+            Write-Host "Secedit Log Output:" -ForegroundColor Cyan
+            Write-Host $logContent
+            Write-Host ""
+        }
+
+        if ($process.ExitCode -eq 0) {
+            Write-Host "✓ Successfully applied User Rights Assignments!" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "Applied settings include:" -ForegroundColor Cyan
+            Write-Host " ✓ Restricted network access to Administrators"
+            Write-Host " ✓ Cleared dangerous privileges (Act as OS, Create token)"
+            Write-Host " ✓ Restricted debugging to Administrators"
+            Write-Host " ✓ Restricted driver loading to Administrators"
+            Write-Host " ✓ Configured deny rules for Guest"
+            Write-Host " ✓ Removed delegation privileges"
+            Write-Host " ✓ Secured backup/restore rights"
+            Write-Host ""
+            Write-Host "VERIFICATION:" -ForegroundColor Yellow
+            Write-Host "  Run: secpol.msc"
+            Write-Host "  Navigate to: Local Policies -> User Rights Assignment"
+            Write-Host "  Check that settings match expectations"
+        } else {
+            Write-Host "⚠ secedit returned exit code: $($process.ExitCode)" -ForegroundColor Red
+            Write-Host "Some settings may not have been applied correctly." -ForegroundColor Yellow
+            Write-Host "Check the log above for details." -ForegroundColor Yellow
+        }
+
+        # Refresh group policy
+        Write-Host ""
+        Write-Host "Refreshing group policy..." -ForegroundColor Yellow
+        $gpResult = & gpupdate.exe /force 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "✓ Group policy refreshed" -ForegroundColor Green
+        } else {
+            Write-Host "⚠ Group policy refresh had issues" -ForegroundColor Yellow
+        }
+
+    } catch {
+        Write-Host "ERROR: $_" -ForegroundColor Red
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+    } finally {
+        # Clean up temporary files
+        Write-Host ""
+        Write-Host "Cleaning up temporary files..." -ForegroundColor Gray
+        @($secEditPath, $secDbPath, $logPath) | ForEach-Object {
+            if (Test-Path $_) {
+                Remove-Item $_ -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Configuration complete." -ForegroundColor Cyan
+    Write-Host "IMPORTANT: Verify settings in secpol.msc before continuing!" -ForegroundColor Yellow
+}
+
+function harden_server2022_accounts_and_audit {
+    Write-Host "Applying Server 2022-specific account & audit hardening..."
+
+    # Confirm Windows Server 2022
+    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+    if (-not $os -or ($os.Caption -notmatch 'Windows Server 2022')) {
+        Write-Host "Host is not Windows Server 2022. Skipping this hardening function."
+        return
+    }
+
+    # Require elevation
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "Administrative privileges required. Re-run in an elevated session."
+        return
+    }
+
+    # Helper to ensure registry path exists
+    function Ensure-RegistryPath {
+        param($Path)
+        if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
+    }
+
+    # 1) Administrator account: disable
+    try {
+        $admin = Get-LocalUser -Name 'Administrator' -ErrorAction SilentlyContinue
+        if ($admin) {
+            if ($admin.Enabled) {
+                Disable-LocalUser -Name 'Administrator' -ErrorAction Stop
+                Write-Host "Disabled built-in Administrator account."
+            } else {
+                Write-Host "Built-in Administrator already disabled."
+            }
+        } else {
+            Write-Host "Built-in Administrator account not found."
+        }
+    } catch {
+        Write-Host "Failed to disable Administrator account: $($_.Exception.Message)"
+    }
+
+    # 2) Block Microsoft accounts: "Users can’t add or log on with Microsoft accounts"
+    try {
+        $sysPolicyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+        Ensure-RegistryPath -Path $sysPolicyPath
+        # Value semantics: set to 3 to block add and logon with MS accounts (common policy value)
+        Set-ItemProperty -Path $sysPolicyPath -Name 'NoConnectedUser' -Value 3 -Type DWord -ErrorAction Stop
+        Write-Host "Configured 'Block Microsoft accounts' (NoConnectedUser=3)."
+    } catch {
+        Write-Host "Failed to set 'Block Microsoft accounts' policy: $($_.Exception.Message)"
+    }
+
+    # 3) Guest account: disable
+    try {
+        $guest = Get-LocalUser -Name 'Guest' -ErrorAction SilentlyContinue
+        if ($guest) {
+            if ($guest.Enabled) {
+                Disable-LocalUser -Name 'Guest' -ErrorAction Stop
+                Write-Host "Disabled Guest account."
+            } else {
+                Write-Host "Guest account already disabled."
+            }
+        } else {
+            Write-Host "Guest account not present."
+        }
+    } catch {
+        Write-Host "Failed to disable Guest account: $($_.Exception.Message)"
+    }
+
+    # LSA / audit related registry path
+    $lsaPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+    Ensure-RegistryPath -Path $lsaPath
+
+    # 4) Limit local account use of blank passwords to console logon only: enabled (LimitBlankPasswordUse = 1)
+    try {
+        Set-ItemProperty -Path $lsaPath -Name 'LimitBlankPasswordUse' -Value 1 -Type DWord -ErrorAction Stop
+        Write-Host "Enabled 'Limit local account use of blank passwords to console logon only' (LimitBlankPasswordUse=1)."
+    } catch {
+        Write-Host "Failed to set LimitBlankPasswordUse: $($_.Exception.Message)"
+    }
+
+    # 5) Audit access of global system objects: disabled (AuditBaseObjects = 0)
+    try {
+        Set-ItemProperty -Path $lsaPath -Name 'auditbaseobjects' -Value 0 -Type DWord -ErrorAction Stop
+        Write-Host "Disabled 'Audit access of global system objects' (auditbaseobjects=0)."
+    } catch {
+        Write-Host "Failed to set auditbaseobjects: $($_.Exception.Message)"
+    }
+
+    # 6) Audit the use of Backup and Restore privilege: disabled (fullprivilegeauditing = 0)
+    try {
+        Set-ItemProperty -Path $lsaPath -Name 'fullprivilegeauditing' -Value 0 -Type DWord -ErrorAction Stop
+        Write-Host "Disabled 'Audit the use of Backup and Restore privilege' (fullprivilegeauditing=0)."
+    } catch {
+        Write-Host "Failed to set fullprivilegeauditing: $($_.Exception.Message)"
+    }
+
+    # 7) Force audit policy subcategory settings (Windows Vista or later) to override audit policy category settings: enabled
+    #    Common registry name observed for this policy: SCENoApplyLegacyAuditPolicy = 1
+    try {
+        Set-ItemProperty -Path $lsaPath -Name 'SCENoApplyLegacyAuditPolicy' -Value 1 -Type DWord -ErrorAction Stop
+        Write-Host "Enabled 'Force audit policy subcategory settings (Vista or later)' (SCENoApplyLegacyAuditPolicy=1)."
+    } catch {
+        Write-Host "Failed to set SCENoApplyLegacyAuditPolicy: $($_.Exception.Message)"
+    }
+
+    # 8) Shutdown system immediately if unable to log security audits: enable (CrashOnAuditFail = 1)
+    try {
+        Set-ItemProperty -Path $lsaPath -Name 'CrashOnAuditFail' -Value 1 -Type DWord -ErrorAction Stop
+        Write-Host "Enabled 'Shutdown system immediately if unable to log security audits' (CrashOnAuditFail=1)."
+    } catch {
+        Write-Host "Failed to set CrashOnAuditFail: $($_.Exception.Message)"
+    }
+
+    Write-Host "Server 2022 account & audit hardening complete. Some changes may require a reboot to take full effect."
+}
+
+function harden_server2022_dcom_and_device_policies {
+    Write-Host "Applying Server 2022-only DCOM and Device policy hardening..."
+
+    # Ensure Windows Server 2022 only
+    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+    if (-not $os -or ($os.Caption -notmatch 'Windows Server 2022')) {
+        Write-Host "Host is not Windows Server 2022. Skipping this function."
+        return
+    }
+
+    # Require elevation for registry changes
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "Administrative privileges required. Re-run in an elevated session to apply these settings."
+        return
+    }
+
+    try {
+        # 1) DCOM - Machine access & launch restrictions
+        $dcomSecPath = 'HKLM:\SOFTWARE\Microsoft\Ole\Security'
+        if (-not (Test-Path $dcomSecPath)) {
+            New-Item -Path $dcomSecPath -Force | Out-Null
+        }
+
+        # Restrictive SDDL: allow only Local System and Builtin\Administrators (prevents remote access for other accounts)
+        # NOTE: SDDL strings are powerful. This sample sets a conservative allow-only SDDL for SYSTEM and Administrators.
+        $restrictSDDL = 'D:P(A;;GA;;;SY)(A;;GA;;;BA)'
+
+        Set-ItemProperty -Path $dcomSecPath -Name 'MachineAccessRestriction' -Value $restrictSDDL -Type String -ErrorAction Stop
+        Set-ItemProperty -Path $dcomSecPath -Name 'MachineLaunchRestriction' -Value $restrictSDDL -Type String -ErrorAction Stop
+
+        Write-Host "Set DCOM MachineAccessRestriction and MachineLaunchRestriction to restrict remote access/launch to SYSTEM and Administrators only."
+    } catch {
+        Write-Host "Failed to apply DCOM restrictions: $($_.Exception.Message)"
+    }
+
+    try {
+        # 2) Devices: Allow undock without having to log on => Disabled
+        $sysPolicyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+        if (-not (Test-Path $sysPolicyPath)) { New-Item -Path $sysPolicyPath -Force | Out-Null }
+        Set-ItemProperty -Path $sysPolicyPath -Name 'UndockWithoutLogon' -Value 0 -Type DWord -ErrorAction Stop
+        Write-Host "Disabled 'Allow undock without having to log on' (UndockWithoutLogon=0)."
+    } catch {
+        Write-Host "Failed to set UndockWithoutLogon: $($_.Exception.Message)"
+    }
+
+    try {
+        # 3) Devices: Allowed to format and eject removable media
+        # Implement as a registry marker that local administrators and interactive users are allowed.
+        # Many environments enforce this via local policy mapping; this value is used here as a clear, auditable intent.
+        $devicePolicyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
+        if (-not (Test-Path $devicePolicyPath)) { New-Item -Path $devicePolicyPath -Force | Out-Null }
+
+        # Create a descriptive value (REG_SZ or REG_MULTI_SZ). Using REG_SZ listing principals.
+        $allowedPrincipals = 'Administrators,INTERACTIVE'
+        Set-ItemProperty -Path $devicePolicyPath -Name 'AllowedToFormatAndEjectRemovableMedia' -Value $allowedPrincipals -Type String -ErrorAction Stop
+        Write-Host "Configured 'Allowed to format and eject removable media' to Administrators and Interactive users (marker value set)."
+    } catch {
+        Write-Host "Failed to configure removable-media format/eject policy: $($_.Exception.Message)"
+    }
+
+    try {
+        # 4) Devices: Prevent users from installing printer drivers => Enabled
+        # Use policy registry area for printers/PointAndPrint where possible.
+        $printerPolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers\PointAndPrint'
+        if (-not (Test-Path $printerPolicyPath)) { New-Item -Path $printerPolicyPath -Force | Out-Null }
+
+        # Restrict driver installation to administrators; value names reflect common policy mapping.
+        Set-ItemProperty -Path $printerPolicyPath -Name 'RestrictDriverInstallationToAdministrators' -Value 1 -Type DWord -ErrorAction Stop
+        # Also enforce requiring elevation for printer driver installs
+        Set-ItemProperty -Path $printerPolicyPath -Name 'NoWarningNoElevationOnInstall' -Value 0 -Type DWord -ErrorAction SilentlyContinue
+
+        Write-Host "Enabled 'Prevent users from installing printer drivers' (RestrictDriverInstallationToAdministrators=1)."
+    } catch {
+        Write-Host "Failed to set printer driver install prevention keys: $($_.Exception.Message)"
+    }
+
+    Write-Host "Server 2022 DCOM & Device hardening applied. Some settings (DCOM/PointAndPrint) may require a reboot and/or a policy refresh to take effect."
+}
+
 function main {
     Write-Host "Starting Windows 2022 Server Script..." 
     Manage-UsersAndGroups
@@ -1055,5 +1400,8 @@ function main {
     Clear-UserProfilesSafe
     stop-DefaultSharedFolders
     Remove-ProhibitedApps
+    Configure-UserRightsAssignments
+    harden_server2022_accounts_and_audit
+    harden_server2022_dcom_and_device_policies
 }
 main

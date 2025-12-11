@@ -439,50 +439,6 @@ function reset_passwords {
     }
 }
 
-function windows_update {
-    Write-Host "Checking for Windows updates..."
-    try {
-        $moduleImported = $false
-
-        # Try a normal import first
-        try {
-            Import-Module PSWindowsUpdate -ErrorAction Stop
-            $moduleImported = $true
-        } catch {
-            # Search all PSModulePath locations for a PSWindowsUpdate folder and try to import from there
-            $paths = $env:PSModulePath -split ';' | Where-Object { $_ -and (Test-Path $_) }
-            foreach ($p in $paths) {
-                $candidate = Join-Path $p 'PSWindowsUpdate'
-                if (Test-Path $candidate) {
-                    try {
-                        Import-Module $candidate -ErrorAction Stop
-                        $moduleImported = $true
-                        break
-                    } catch {}
-                }
-            }
-        }
-
-        # If still not imported, attempt to install to CurrentUser (does not require admin)
-        if (-not $moduleImported) {
-            Write-Host "PSWindowsUpdate module not found in PSModulePath; attempting to install to CurrentUser..."
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-            Install-Module -Name PSWindowsUpdate -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
-            Import-Module PSWindowsUpdate -ErrorAction Stop
-            $moduleImported = $true
-        }
-
-        # Verify the cmdlet exists before invoking
-        if ($moduleImported -and (Get-Command -Name Install-WindowsUpdate -ErrorAction SilentlyContinue)) {
-            Install-WindowsUpdate -AcceptAll -AutoReboot
-            Write-Host "Windows updates installed successfully."
-        } else {
-            Write-Host "Install-WindowsUpdate cmdlet not available after importing PSWindowsUpdate."
-        }
-    } catch {
-        Write-Host "Error installing Windows updates: $_"
-    }
-}
 function antivirus_check {
     Write-Host "Checking for antivirus software..."
     try {
@@ -632,47 +588,6 @@ function disable_remote_services {
     Write-Host "Remote services adjustment complete."
 }
 
-function disable_additional_services {
-    Write-Host "Disabling additional vulnerable services..."
-
-    $servicesToDisable = @(
-        'TapiSrv',
-        'TlntSvr',
-        'ftpsvc',
-        'SNMP',
-        'SessionEnv',
-        'UmRdpService',    # Note: UmRdpService removed from target list below in favor of preserving RDP functionality
-        'SharedAccess',
-        'RemoteRegistry',
-        'SSDPSRV',
-        'W3SVC',
-        'SNMPTRAP',
-        'RemoteAccess',
-        'HomeGroupProvider',
-        'HomeGroupListener'
-    )
-
-    # Remove TermService and UmRdpService from disable list to avoid disabling RDP functionality
-    $servicesToDisable = $servicesToDisable | Where-Object { $_ -notin @('TermService','UmRdpService') }
-
-    foreach ($service in $servicesToDisable) {
-        $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
-        if ($svc) {
-            try {
-                if ($svc.Status -ne 'Stopped') {
-                    Stop-Service -Name $service -Force -ErrorAction Stop
-                    Write-Host "Stopped service: $service"
-                }
-                Set-Service -Name $service -StartupType Disabled -ErrorAction Stop
-                Write-Host "Disabled service: $service"
-            } catch {
-                Write-Host "Warning: Could not modify service $service : $($_.Exception.Message)"
-            }
-        } else {
-            Write-Host "Service $service not found on this system."
-        }
-    }
-}
 function checkUAC {
     Write-Host "Checking UAC settings for maximum security..."
     $uacRegPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
@@ -2080,7 +1995,7 @@ function main {
     enforce_domain_hardening
     harden_defender_and_exploit_protection
 
-   
+
     Write-Host "Windows Hardening Script completed."
 }
 
