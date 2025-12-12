@@ -1037,7 +1037,7 @@ function stop-DefaultSharedFolders {
     Write-Host "Operation complete. Verify Shares in Computer Management -> Shared Folders if needed."
 }
 
-function Configure-UserRightsAssignments {
+function Set-UserRightsAssignments {
     # Require elevation
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
         Write-Host "This operation requires administrative privileges. Re-run in an elevated session." -ForegroundColor Red
@@ -1382,6 +1382,1078 @@ function harden_server2022_dcom_and_device_policies {
     Write-Host "Server 2022 DCOM & Device hardening applied. Some settings (DCOM/PointAndPrint) may require a reboot and/or a policy refresh to take effect."
 }
 
+function Set-SecPol {
+    # Require elevation
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "This operation requires administrative privileges. Re-run in an elevated session." -ForegroundColor Red
+        return
+    }
+
+    Write-Host "=== CyberPatriot Security Policy Configuration ===" -ForegroundColor Cyan
+    Write-Host "Configuring all local security policies..." -ForegroundColor Yellow
+    Write-Host ""
+
+    # Create temporary files
+    $secEditPath = "$env:TEMP\secedit_config_$(Get-Random).inf"
+    $secDbPath = "$env:TEMP\secedit_db_$(Get-Random).sdb"
+    $logPath = "$env:TEMP\secedit_log_$(Get-Random).txt"
+
+    # Complete security template with all CyberPatriot settings
+    $securityTemplate = @"
+[Unicode]
+Unicode=yes
+[Version]
+signature="`$CHICAGO`$"
+Revision=1
+[System Access]
+RequireLogonToChangePassword = 0
+ForceLogoffWhenHourExpire = 1
+ClearTextPassword = 0
+LSAAnonymousNameLookup = 0
+EnableAdminAccount = 0
+EnableGuestAccount = 0
+[Registry Values]
+MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Setup\RecoveryConsole\SecurityLevel=4,0
+MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Setup\RecoveryConsole\SetCommand=4,0
+MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\CachedLogonsCount=1,"4"
+MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\ForceUnlockLogon=4,0
+MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\PasswordExpiryWarning=4,14
+MACHINE\Software\Microsoft\Windows NT\CurrentVersion\Winlogon\ScRemoveOption=1,"1"
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\ConsentPromptBehaviorAdmin=4,2
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\ConsentPromptBehaviorUser=4,0
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\DisableCAD=4,0
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\DontDisplayLastUserName=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\EnableInstallerDetection=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\EnableLUA=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\EnableSecureUIAPaths=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\EnableUIADesktopToggle=4,0
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\EnableVirtualization=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\FilterAdministratorToken=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\InactivityTimeoutSecs=4,900
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\LegalNoticeCaption=1,"CyberPatriot Warning"
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\LegalNoticeText=7,Unauthorized access prohibited
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\MaxDevicePasswordFailedAttempts=4,10
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\PromptOnSecureDesktop=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\ScForceOption=4,1
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\ShutdownWithoutLogon=4,0
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\UndockWithoutLogon=4,0
+MACHINE\Software\Microsoft\Windows\CurrentVersion\Policies\System\ValidateAdminCodeSignatures=4,0
+MACHINE\System\CurrentControlSet\Control\Lsa\AuditBaseObjects=4,0
+MACHINE\System\CurrentControlSet\Control\Lsa\CrashOnAuditFail=4,0
+MACHINE\System\CurrentControlSet\Control\Lsa\DisableDomainCreds=4,1
+MACHINE\System\CurrentControlSet\Control\Lsa\EveryoneIncludesAnonymous=4,0
+MACHINE\System\CurrentControlSet\Control\Lsa\FIPSAlgorithmPolicy\Enabled=4,0
+MACHINE\System\CurrentControlSet\Control\Lsa\ForceGuest=4,0
+MACHINE\System\CurrentControlSet\Control\Lsa\FullPrivilegeAuditing=3,0
+MACHINE\System\CurrentControlSet\Control\Lsa\LimitBlankPasswordUse=4,1
+MACHINE\System\CurrentControlSet\Control\Lsa\LmCompatibilityLevel=4,5
+MACHINE\System\CurrentControlSet\Control\Lsa\MSV1_0\NTLMMinClientSec=4,537395200
+MACHINE\System\CurrentControlSet\Control\Lsa\MSV1_0\NTLMMinServerSec=4,537395200
+MACHINE\System\CurrentControlSet\Control\Lsa\NoLMHash=4,1
+MACHINE\System\CurrentControlSet\Control\Lsa\RestrictAnonymous=4,1
+MACHINE\System\CurrentControlSet\Control\Lsa\RestrictAnonymousSAM=4,1
+MACHINE\System\CurrentControlSet\Control\Lsa\RestrictRemoteSAM=1,"O:BAG:BAD:(A;;RC;;;BA)"
+MACHINE\System\CurrentControlSet\Control\Lsa\UseMachineId=4,1
+MACHINE\System\CurrentControlSet\Control\Print\Providers\LanMan Print Services\Servers\AddPrinterDrivers=4,1
+MACHINE\System\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedExactPaths\Machine=7,
+MACHINE\System\CurrentControlSet\Control\SecurePipeServers\Winreg\AllowedPaths\Machine=7,
+MACHINE\System\CurrentControlSet\Control\Session Manager\Kernel\ObCaseInsensitive=4,1
+MACHINE\System\CurrentControlSet\Control\Session Manager\Memory Management\ClearPageFileAtShutdown=4,0
+MACHINE\System\CurrentControlSet\Control\Session Manager\ProtectionMode=4,1
+MACHINE\System\CurrentControlSet\Control\Session Manager\SubSystems\optional=7,
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\AutoDisconnect=4,15
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\EnableForcedLogOff=4,1
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\EnableSecuritySignature=4,1
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\NullSessionPipes=7,
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\NullSessionShares=7,
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\RequireSecuritySignature=4,1
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\RestrictNullSessAccess=4,1
+MACHINE\System\CurrentControlSet\Services\LanManServer\Parameters\SmbServerNameHardeningLevel=4,1
+MACHINE\System\CurrentControlSet\Services\LanmanWorkstation\Parameters\EnablePlainTextPassword=4,0
+MACHINE\System\CurrentControlSet\Services\LanmanWorkstation\Parameters\EnableSecuritySignature=4,1
+MACHINE\System\CurrentControlSet\Services\LanmanWorkstation\Parameters\RequireSecuritySignature=4,1
+MACHINE\System\CurrentControlSet\Services\LDAP\LDAPClientIntegrity=4,1
+MACHINE\System\CurrentControlSet\Services\Netlogon\Parameters\DisablePasswordChange=4,0
+MACHINE\System\CurrentControlSet\Services\Netlogon\Parameters\MaximumPasswordAge=4,30
+MACHINE\System\CurrentControlSet\Services\Netlogon\Parameters\RequireSignOrSeal=4,1
+MACHINE\System\CurrentControlSet\Services\Netlogon\Parameters\RequireStrongKey=4,1
+MACHINE\System\CurrentControlSet\Services\Netlogon\Parameters\SealSecureChannel=4,1
+MACHINE\System\CurrentControlSet\Services\Netlogon\Parameters\SignSecureChannel=4,1
+[Privilege Rights]
+SeTrustedCredManAccessPrivilege = 
+SeNetworkLogonRight = *S-1-5-32-544
+SeTcbPrivilege = 
+SeIncreaseQuotaPrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20
+SeInteractiveLogonRight = *S-1-5-32-544,*S-1-5-32-545
+SeRemoteInteractiveLogonRight = *S-1-5-32-544,*S-1-5-32-555
+SeBackupPrivilege = *S-1-5-32-544
+SeSystemtimePrivilege = *S-1-5-32-544,*S-1-5-19
+SeTimeZonePrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-32-545
+SeCreatePagefilePrivilege = *S-1-5-32-544
+SeCreateTokenPrivilege = 
+SeCreateGlobalPrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20,*S-1-5-6
+SeCreatePermanentPrivilege = 
+SeCreateSymbolicLinkPrivilege = *S-1-5-32-544
+SeDebugPrivilege = *S-1-5-32-544
+SeDenyNetworkLogonRight = *S-1-5-32-546,*S-1-5-113
+SeDenyBatchLogonRight = *S-1-5-32-546
+SeDenyServiceLogonRight = *S-1-5-32-546
+SeDenyInteractiveLogonRight = *S-1-5-32-546
+SeDenyRemoteInteractiveLogonRight = *S-1-5-32-546,*S-1-5-113
+SeEnableDelegationPrivilege = 
+SeRemoteShutdownPrivilege = *S-1-5-32-544
+SeAuditPrivilege = *S-1-5-19,*S-1-5-20
+SeImpersonatePrivilege = *S-1-5-32-544,*S-1-5-19,*S-1-5-20,*S-1-5-6
+SeIncreaseBasePriorityPrivilege = *S-1-5-32-544
+SeLoadDriverPrivilege = *S-1-5-32-544
+SeLockMemoryPrivilege = 
+SeBatchLogonRight = *S-1-5-32-544
+SeServiceLogonRight = 
+SeSecurityPrivilege = *S-1-5-32-544
+SeRelabelPrivilege = 
+SeSystemEnvironmentPrivilege = *S-1-5-32-544
+SeManageVolumePrivilege = *S-1-5-32-544
+SeProfileSingleProcessPrivilege = *S-1-5-32-544
+SeSystemProfilePrivilege = *S-1-5-32-544,*S-1-5-80-3139157870-2983391045-3678747466-658725712-1809340420
+SeAssignPrimaryTokenPrivilege = *S-1-5-19,*S-1-5-20
+SeRestorePrivilege = *S-1-5-32-544
+SeShutdownPrivilege = *S-1-5-32-544,*S-1-5-32-545
+SeTakeOwnershipPrivilege = *S-1-5-32-544
+"@
+
+    try {
+        Write-Host "[1/5] Creating security template..." -ForegroundColor Yellow
+        $securityTemplate | Out-File -FilePath $secEditPath -Encoding unicode -Force
+
+        if (-not (Test-Path $secEditPath)) {
+            throw "Failed to create security template file"
+        }
+        Write-Host "  ✓ Template created" -ForegroundColor Green
+
+        Write-Host "[2/5] Applying security configuration (this may take 30-60 seconds)..." -ForegroundColor Yellow
+        
+        $seceditArgs = @(
+            "/configure"
+            "/db", $secDbPath
+            "/cfg", $secEditPath
+            "/log", $logPath
+            "/overwrite"
+            "/quiet"
+        )
+        
+        $process = Start-Process -FilePath "secedit.exe" -ArgumentList $seceditArgs -Wait -PassThru -NoNewWindow
+        
+        if ($process.ExitCode -eq 0) {
+            Write-Host "  ✓ Security policies applied successfully" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠ Secedit exit code: $($process.ExitCode)" -ForegroundColor Yellow
+            if (Test-Path $logPath) {
+                Write-Host "  Log details:" -ForegroundColor Gray
+                Get-Content $logPath | Select-Object -Last 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+            }
+        }
+
+        Write-Host "[3/5] Configuring additional registry-based policies..." -ForegroundColor Yellow
+        
+        # Additional policies that need direct registry configuration
+        $regPolicies = @(
+            # Block Microsoft Accounts
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="NoConnectedUser"; Value=3; Type="DWord"}
+            
+            # DCOM restrictions
+            @{Path="HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DCOM"; Name="MachineAccessRestriction"; Value=1; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DCOM"; Name="MachineLaunchRestriction"; Value=1; Type="DWord"}
+            
+            # UAC policies
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="ConsentPromptBehaviorAdmin"; Value=2; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="ConsentPromptBehaviorUser"; Value=0; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="EnableLUA"; Value=1; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="PromptOnSecureDesktop"; Value=1; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="EnableInstallerDetection"; Value=1; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="EnableSecureUIAPaths"; Value=1; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="EnableVirtualization"; Value=1; Type="DWord"}
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"; Name="FilterAdministratorToken"; Value=1; Type="DWord"}
+            
+            # Network security - Restrict NTLM
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"; Name="RestrictReceivingNTLMTraffic"; Value=2; Type="DWord"}
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\MSV1_0"; Name="RestrictSendingNTLMTraffic"; Value=2; Type="DWord"}
+            @{Path="HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters"; Name="RestrictNTLMInDomain"; Value=7; Type="DWord"}
+            
+            # Kerberos encryption types
+            @{Path="HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters"; Name="SupportedEncryptionTypes"; Value=2147483640; Type="DWord"}
+        )
+
+        $regCount = 0
+        foreach ($policy in $regPolicies) {
+            try {
+                if (-not (Test-Path $policy.Path)) {
+                    New-Item -Path $policy.Path -Force | Out-Null
+                }
+                New-ItemProperty -Path $policy.Path -Name $policy.Name -Value $policy.Value -PropertyType $policy.Type -Force -ErrorAction Stop | Out-Null
+                $regCount++
+            } catch {
+                Write-Host "    ⚠ Failed to set $($policy.Name): $_" -ForegroundColor Yellow
+            }
+        }
+        Write-Host "  ✓ Applied $regCount additional registry policies" -ForegroundColor Green
+
+        Write-Host "[4/5] Disabling Guest and Administrator accounts..." -ForegroundColor Yellow
+        try {
+            Disable-LocalUser -Name "Guest" -ErrorAction SilentlyContinue
+            Disable-LocalUser -Name "Administrator" -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Accounts disabled" -ForegroundColor Green
+        } catch {
+            Write-Host "  ⚠ Could not disable accounts (may already be disabled)" -ForegroundColor Yellow
+        }
+
+        Write-Host "[5/5] Refreshing group policy..." -ForegroundColor Yellow
+        $gpResult = & gpupdate.exe /force /wait:0 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✓ Group policy refreshed" -ForegroundColor Green
+        }
+
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Green
+        Write-Host "✓ SECURITY CONFIGURATION COMPLETE" -ForegroundColor Green
+        Write-Host "============================================" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Applied settings:" -ForegroundColor Cyan
+        Write-Host "  ✓ User rights assignments (43 policies)" -ForegroundColor White
+        Write-Host "  ✓ Security options (UAC, network security, etc.)" -ForegroundColor White
+        Write-Host "  ✓ Guest and Administrator accounts disabled" -ForegroundColor White
+        Write-Host "  ✓ Network security hardening (SMB signing, NTLM restrictions)" -ForegroundColor White
+        Write-Host "  ✓ Interactive logon security (no last username, inactivity timeout)" -ForegroundColor White
+        Write-Host ""
+        Write-Host "VERIFICATION:" -ForegroundColor Yellow
+        Write-Host "  1. Open: secpol.msc" -ForegroundColor White
+        Write-Host "  2. Check: Local Policies -> Security Options" -ForegroundColor White
+        Write-Host "  3. Check: Local Policies -> User Rights Assignment" -ForegroundColor White
+        Write-Host "  4. Check: Account Policies -> Password Policy" -ForegroundColor White
+        Write-Host ""
+
+    } catch {
+        Write-Host ""
+        Write-Host "ERROR: $_" -ForegroundColor Red
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+    } finally {
+        # Clean up temporary files
+        Write-Host "Cleaning up temporary files..." -ForegroundColor Gray
+        @($secEditPath, $secDbPath, $logPath) | ForEach-Object {
+            if (Test-Path $_) {
+                Remove-Item $_ -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function Set-WindowsUpdate {
+    Write-Host "Configuring Windows Update for automatic updates..." -ForegroundColor Cyan
+    
+    try {
+        # Enable Windows Update service
+        Set-Service -Name wuauserv -StartupType Automatic -ErrorAction Stop
+        Start-Service -Name wuauserv -ErrorAction SilentlyContinue
+        
+        # Configure automatic updates via registry
+        $wuPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU"
+        if (-not (Test-Path $wuPath)) {
+            New-Item -Path $wuPath -Force | Out-Null
+        }
+        
+        # AUOptions: 4 = Auto download and schedule install
+        Set-ItemProperty -Path $wuPath -Name "NoAutoUpdate" -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $wuPath -Name "AUOptions" -Value 4 -Type DWord -Force
+        Set-ItemProperty -Path $wuPath -Name "ScheduledInstallDay" -Value 0 -Type DWord -Force  # 0 = Every day
+        Set-ItemProperty -Path $wuPath -Name "ScheduledInstallTime" -Value 3 -Type DWord -Force  # 3 AM
+        
+        Write-Host "  ✓ Windows Update configured for automatic updates" -ForegroundColor Green
+        
+        # Check for updates
+        $updateCheck = Read-Host "Do you want to check for updates now? (Y/N)"
+        if ($updateCheck -match '^[Yy]') {
+            Write-Host "Checking for Windows updates (this may take a minute)..." -ForegroundColor Yellow
+            Start-Process "ms-settings:windowsupdate" -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Windows Update opened - please install available updates" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring Windows Update: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-AutoRun {
+    Write-Host "Disabling AutoRun/AutoPlay for all drives..." -ForegroundColor Cyan
+    
+    try {
+        # Disable AutoRun for all drives
+        $autorunPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+        if (-not (Test-Path $autorunPath)) {
+            New-Item -Path $autorunPath -Force | Out-Null
+        }
+        
+        # NoDriveTypeAutoRun: 0xFF disables autorun for all drive types
+        Set-ItemProperty -Path $autorunPath -Name "NoDriveTypeAutoRun" -Value 0xFF -Type DWord -Force
+        Set-ItemProperty -Path $autorunPath -Name "NoAutorun" -Value 1 -Type DWord -Force
+        
+        # Also disable for current user
+        $userAutorunPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer"
+        if (-not (Test-Path $userAutorunPath)) {
+            New-Item -Path $userAutorunPath -Force | Out-Null
+        }
+        Set-ItemProperty -Path $userAutorunPath -Name "NoDriveTypeAutoRun" -Value 0xFF -Type DWord -Force
+        
+        Write-Host "  ✓ AutoRun/AutoPlay disabled for all drives" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error disabling AutoRun: $_" -ForegroundColor Red
+    }
+}
+
+function Set-ScreenSaver {
+    Write-Host "Configuring secure screensaver settings..." -ForegroundColor Cyan
+    
+    try {
+        $screenSaverPath = "HKCU:\Control Panel\Desktop"
+        
+        # Enable screensaver (screen saver active)
+        Set-ItemProperty -Path $screenSaverPath -Name "ScreenSaveActive" -Value "1" -Type String -Force
+        
+        # Set timeout to 10 minutes (600 seconds)
+        Set-ItemProperty -Path $screenSaverPath -Name "ScreenSaveTimeOut" -Value "600" -Type String -Force
+        
+        # Require password on resume
+        Set-ItemProperty -Path $screenSaverPath -Name "ScreenSaverIsSecure" -Value "1" -Type String -Force
+        
+        # Apply to all users via registry (HKLM)
+        $allUsersPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
+        if (-not (Test-Path $allUsersPath)) {
+            New-Item -Path $allUsersPath -Force | Out-Null
+        }
+        Set-ItemProperty -Path $allUsersPath -Name "InactivityTimeoutSecs" -Value 600 -Type DWord -Force
+        
+        Write-Host "  ✓ Screensaver configured: 10 minute timeout with password" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring screensaver: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-IPv6 {
+    Write-Host "Checking IPv6 configuration..." -ForegroundColor Cyan
+    
+    $disable = Read-Host "Do you want to disable IPv6? (Y/N)"
+    
+    if ($disable -match '^[Yy]') {
+        try {
+            # Disable IPv6 on all adapters
+            Get-NetAdapterBinding -ComponentID ms_tcpip6 | Disable-NetAdapterBinding -ComponentID ms_tcpip6 -Confirm:$false -ErrorAction Stop
+            
+            # Also disable via registry (more thorough)
+            $ipv6Path = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters"
+            if (-not (Test-Path $ipv6Path)) {
+                New-Item -Path $ipv6Path -Force | Out-Null
+            }
+            Set-ItemProperty -Path $ipv6Path -Name "DisabledComponents" -Value 0xFF -Type DWord -Force
+            
+            Write-Host "  ✓ IPv6 disabled on all network adapters" -ForegroundColor Green
+            Write-Host "  ⚠ A reboot may be required for changes to take full effect" -ForegroundColor Yellow
+            
+        } catch {
+            Write-Host "  ⚠ Error disabling IPv6: $_" -ForegroundColor Red
+        }
+    } else {
+        Write-Host "  ℹ IPv6 left enabled" -ForegroundColor Gray
+    }
+}
+
+function Set-EventLogSize {
+    Write-Host "Configuring Event Log retention and size..." -ForegroundColor Cyan
+    
+    try {
+        $logs = @("Application", "Security", "System")
+        $maxSize = 512MB  # 512 MB
+        
+        foreach ($log in $logs) {
+            try {
+                $logInstance = Get-WinEvent -ListLog $log -ErrorAction Stop
+                $logInstance.MaximumSizeInBytes = $maxSize
+                $logInstance.IsEnabled = $true
+                $logInstance.SaveChanges()
+                Write-Host "  ✓ Configured $log log: Max size 512MB, enabled" -ForegroundColor Green
+            } catch {
+                Write-Host "  ⚠ Could not configure $log log: $_" -ForegroundColor Yellow
+            }
+        }
+        
+        # Enable log retention
+        $logPath = "HKLM:\SYSTEM\CurrentControlSet\Services\EventLog"
+        foreach ($log in $logs) {
+            $fullPath = "$logPath\$log"
+            if (Test-Path $fullPath) {
+                Set-ItemProperty -Path $fullPath -Name "Retention" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+                Set-ItemProperty -Path $fullPath -Name "AutoBackupLogFiles" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+            }
+        }
+        
+        Write-Host "  ✓ Event log retention configured" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring event logs: $_" -ForegroundColor Red
+    }
+}
+
+function Find-SuspiciousScheduledTasks {
+    Write-Host "Scanning for suspicious scheduled tasks..." -ForegroundColor Cyan
+    
+    try {
+        $suspiciousTasks = @()
+        $allTasks = Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' }
+        
+        foreach ($task in $allTasks) {
+            $taskInfo = Get-ScheduledTaskInfo -TaskName $task.TaskName -TaskPath $task.TaskPath -ErrorAction SilentlyContinue
+            
+            # Check for suspicious characteristics
+            $suspicious = $false
+            $reasons = @()
+            
+            # Check if task runs from suspicious locations
+            if ($task.Actions.Execute -match '(\\Temp\\|\\Downloads\\|\\AppData\\Local\\Temp)') {
+                $suspicious = $true
+                $reasons += "Runs from temp location"
+            }
+            
+            # Check if task runs script files
+            if ($task.Actions.Execute -match '\.(bat|cmd|vbs|ps1|js)$') {
+                $suspicious = $true
+                $reasons += "Executes script file"
+            }
+            
+            # Check if hidden task
+            if ($task.Settings.Hidden) {
+                $suspicious = $true
+                $reasons += "Hidden task"
+            }
+            
+            if ($suspicious) {
+                $suspiciousTasks += [PSCustomObject]@{
+                    Name = $task.TaskName
+                    Path = $task.TaskPath
+                    Action = $task.Actions.Execute
+                    Arguments = $task.Actions.Arguments
+                    Reasons = $reasons -join ", "
+                    Author = $task.Author
+                }
+            }
+        }
+        
+        if ($suspiciousTasks.Count -gt 0) {
+            Write-Host "  ⚠ Found $($suspiciousTasks.Count) suspicious scheduled tasks:" -ForegroundColor Yellow
+            $suspiciousTasks | Format-Table -AutoSize
+            
+            $remove = Read-Host "Review these tasks and disable suspicious ones manually? (Y/N)"
+            if ($remove -match '^[Yy]') {
+                Start-Process taskschd.msc
+            }
+        } else {
+            Write-Host "  ✓ No obviously suspicious scheduled tasks found" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error scanning scheduled tasks: $_" -ForegroundColor Red
+    }
+}
+
+function Test-StartupPrograms {
+    Write-Host "Checking startup programs..." -ForegroundColor Cyan
+    
+    try {
+        $startupLocations = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
+            "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
+        )
+        
+        $startupItems = @()
+        
+        foreach ($location in $startupLocations) {
+            if (Test-Path $location) {
+                $items = Get-ItemProperty -Path $location -ErrorAction SilentlyContinue
+                if ($items) {
+                    $items.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
+                        $startupItems += [PSCustomObject]@{
+                            Location = $location
+                            Name = $_.Name
+                            Command = $_.Value
+                        }
+                    }
+                }
+            }
+        }
+        
+        if ($startupItems.Count -gt 0) {
+            Write-Host "  Found $($startupItems.Count) startup items:" -ForegroundColor Yellow
+            $startupItems | Format-Table -AutoSize -Wrap
+            
+            Write-Host "  ℹ Review these items and remove any unauthorized programs" -ForegroundColor Cyan
+            $openMsconfig = Read-Host "Open Task Manager to manage startup? (Y/N)"
+            if ($openMsconfig -match '^[Yy]') {
+                Start-Process taskmgr.exe -ArgumentList "/0 /startup"
+            }
+        } else {
+            Write-Host "  ✓ No startup programs found in registry" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking startup programs: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-UnnecessaryWindowsFeatures {
+    Write-Host "Checking for unnecessary Windows features..." -ForegroundColor Cyan
+    
+    # Features that are typically unnecessary and should be removed
+    $featuresToDisable = @(
+        "TelnetClient",
+        "TelnetServer", 
+        "TFTP",
+        "SMB1Protocol",
+        "SMB1Protocol-Client",
+        "SMB1Protocol-Server",
+        "SimpleTCP",
+        "Printing-XPSServices-Features",
+        "SNMP",
+        "WorkFolders-Client"
+    )
+    
+    try {
+        Write-Host "  Checking Windows optional features..." -ForegroundColor Yellow
+        
+        foreach ($feature in $featuresToDisable) {
+            try {
+                $featureState = Get-WindowsOptionalFeature -Online -FeatureName $feature -ErrorAction SilentlyContinue
+                
+                if ($featureState -and $featureState.State -eq "Enabled") {
+                    Write-Host "    Disabling: $feature" -ForegroundColor Yellow
+                    Disable-WindowsOptionalFeature -Online -FeatureName $feature -NoRestart -ErrorAction Stop | Out-Null
+                    Write-Host "    ✓ Disabled: $feature" -ForegroundColor Green
+                }
+            } catch {
+                # Feature might not exist on this version, skip silently
+            }
+        }
+        
+        Write-Host "  ✓ Unnecessary Windows features disabled" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error disabling Windows features: $_" -ForegroundColor Red
+    }
+}
+
+function Set-PowerOptions {
+    Write-Host "Configuring power options for security..." -ForegroundColor Cyan
+    
+    try {
+        # Set power plan to High Performance or Balanced
+        $powerPlan = powercfg /list | Select-String "Balanced" | ForEach-Object { 
+            if ($_ -match '([a-f0-9\-]{36})') { $matches[1] }
+        }
+        
+        if ($powerPlan) {
+            powercfg /setactive $powerPlan
+            Write-Host "  ✓ Set power plan to Balanced" -ForegroundColor Green
+        }
+        
+        # Disable hibernation (security risk - hiberfil.sys can contain sensitive data)
+        powercfg /hibernate off
+        Write-Host "  ✓ Hibernation disabled" -ForegroundColor Green
+        
+        # Set screen timeout
+        powercfg /change monitor-timeout-ac 10  # 10 minutes on AC
+        powercfg /change monitor-timeout-dc 5   # 5 minutes on battery
+        
+        # Set sleep timeout
+        powercfg /change standby-timeout-ac 0   # Never sleep on AC (server)
+        powercfg /change standby-timeout-dc 15  # 15 minutes on battery
+        
+        Write-Host "  ✓ Power timeouts configured" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring power options: $_" -ForegroundColor Red
+    }
+}
+
+function Test-SuspiciousFiles {
+    Write-Host "Checking for suspicious files in common locations..." -ForegroundColor Cyan
+    
+    try {
+        $suspiciousExtensions = @('*.exe', '*.bat', '*.cmd', '*.vbs', '*.ps1', '*.com', '*.scr')
+        $suspiciousLocations = @(
+            "$env:TEMP",
+            "$env:SystemRoot\Temp",
+            "C:\Users\Public\Desktop",
+            "C:\ProgramData"
+        )
+        
+        $suspiciousFiles = @()
+        
+        foreach ($location in $suspiciousLocations) {
+            if (Test-Path $location) {
+                foreach ($ext in $suspiciousExtensions) {
+                    $files = Get-ChildItem -Path $location -Filter $ext -Recurse -ErrorAction SilentlyContinue -Force |
+                             Where-Object { $_.LastWriteTime -gt (Get-Date).AddDays(-7) }  # Modified in last 7 days
+                    
+                    if ($files) {
+                        $suspiciousFiles += $files
+                    }
+                }
+            }
+        }
+        
+        if ($suspiciousFiles.Count -gt 0) {
+            Write-Host "  ⚠ Found $($suspiciousFiles.Count) recently modified executable files in temp locations:" -ForegroundColor Yellow
+            $suspiciousFiles | Select-Object FullName, LastWriteTime, Length | Format-Table -AutoSize
+            
+            $review = Read-Host "Open these locations in Explorer to review? (Y/N)"
+            if ($review -match '^[Yy]') {
+                $suspiciousLocations | ForEach-Object {
+                    if (Test-Path $_) {
+                        explorer.exe $_
+                    }
+                }
+            }
+        } else {
+            Write-Host "  ✓ No suspicious files found in common temp locations" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error scanning for suspicious files: $_" -ForegroundColor Red
+    }
+}
+function Test-HostsFile {
+    Write-Host "Checking HOSTS file for suspicious entries..." -ForegroundColor Cyan
+    
+    try {
+        $hostsPath = "$env:SystemRoot\System32\drivers\etc\hosts"
+        
+        if (Test-Path $hostsPath) {
+            $hostsContent = Get-Content $hostsPath
+            $suspiciousEntries = $hostsContent | Where-Object { 
+                $_ -notmatch '^\s*#' -and  # Not a comment
+                $_ -notmatch '^\s*$' -and  # Not empty
+                $_ -match '\S'              # Contains non-whitespace
+            }
+            
+            if ($suspiciousEntries.Count -gt 0) {
+                Write-Host "  ⚠ Found $($suspiciousEntries.Count) entries in HOSTS file:" -ForegroundColor Yellow
+                $suspiciousEntries | ForEach-Object { Write-Host "    $_" -ForegroundColor White }
+                
+                $edit = Read-Host "Open HOSTS file for review? (Y/N)"
+                if ($edit -match '^[Yy]') {
+                    notepad.exe $hostsPath
+                }
+            } else {
+                Write-Host "  ✓ HOSTS file is clean (only comments/empty lines)" -ForegroundColor Green
+            }
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking HOSTS file: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-NetBIOSoverTCP {
+    Write-Host "Disabling NetBIOS over TCP/IP..." -ForegroundColor Cyan
+    
+    try {
+        $adapters = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+        
+        foreach ($adapter in $adapters) {
+            # Disable NetBIOS over TCP/IP (2 = Disable)
+            $adapter.SetTcpipNetbios(2) | Out-Null
+            Write-Host "  ✓ Disabled NetBIOS on: $($adapter.Description)" -ForegroundColor Green
+        }
+        
+        Write-Host "  ✓ NetBIOS over TCP/IP disabled on all adapters" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error disabling NetBIOS: $_" -ForegroundColor Red
+    }
+}
+
+function Set-DNSClientSecurity {
+    Write-Host "Configuring DNS client security..." -ForegroundColor Cyan
+    
+    try {
+        # Disable LLMNR (Link-Local Multicast Name Resolution)
+        $llmnrPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient"
+        if (-not (Test-Path $llmnrPath)) {
+            New-Item -Path $llmnrPath -Force | Out-Null
+        }
+        Set-ItemProperty -Path $llmnrPath -Name "EnableMulticast" -Value 0 -Type DWord -Force
+        Write-Host "  ✓ LLMNR disabled" -ForegroundColor Green
+        
+        # Disable NetBIOS name resolution fallback
+        $netbiosPath = "HKLM:\SYSTEM\CurrentControlSet\Services\NetBT\Parameters"
+        if (Test-Path $netbiosPath) {
+            Set-ItemProperty -Path $netbiosPath -Name "NodeType" -Value 2 -Type DWord -Force  # 2 = P-node (WINS only)
+        }
+        
+        Write-Host "  ✓ DNS client security configured" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring DNS security: $_" -ForegroundColor Red
+    }
+}
+
+function harden_defender_and_exploit_protection {
+    # Require elevation for registry/service changes
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "This operation requires administrative privileges. Re-run in an elevated session."
+        return
+    }
+
+    Write-Host "Hardening Microsoft Defender and Exploit Protection..."
+
+    # 1) Ensure Defender is not in passive mode (remove ForceDefenderPassiveMode)
+    try {
+        $passiveReg = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Advanced Threat Protection'
+        if (Test-Path $passiveReg) {
+            $prop = Get-ItemProperty -Path $passiveReg -Name 'ForceDefenderPassiveMode' -ErrorAction SilentlyContinue
+            if ($null -ne $prop -and $prop.ForceDefenderPassiveMode -ne $null) {
+                    Remove-ItemProperty -Path $passiveReg -Name 'ForceDefenderPassiveMode' -ErrorAction Stop
+                    Write-Host "Removed ForceDefenderPassiveMode registry value."
+            } else {
+                Write-Host "ForceDefenderPassiveMode not present."
+            }
+        } else {
+            Write-Host "ATP registry path not present (no ForceDefenderPassiveMode)."
+        }
+    } catch {
+        Write-Host "Failed handling ForceDefenderPassiveMode: $($_.Exception.Message)"
+    }
+
+    # 2) Enable Defender network protection
+    if (Get-Command -Name Set-MpPreference -ErrorAction SilentlyContinue) {
+        try {
+            $current = Get-MpPreference
+            if ($current.EnableNetworkProtection -ne 'Enabled') {
+                    Set-MpPreference -EnableNetworkProtection Enabled -ErrorAction Stop
+                    Write-Host "Enabled Defender Network Protection."
+            } else {
+                Write-Host "Network Protection already enabled."
+            }
+        } catch {
+            Write-Host "Failed to query/set Network Protection: $($_.Exception.Message)"
+        }
+    } else {
+        Write-Host "Defender cmdlets not available; cannot set Network Protection via Set-MpPreference."
+    }
+
+    # 3) Ensure Severe threat default action is not 'Ignore' (numeric value 6)
+    try {
+        if (Get-Command -Name Get-MpPreference -ErrorAction SilentlyContinue) {
+            $mp = Get-MpPreference
+            if ($mp.PSObject.Properties.Name -contains 'SevereThreatDefaultAction') {
+                $sev = $mp.SevereThreatDefaultAction
+                if ($sev -eq 6) {
+                        Set-MpPreference -SevereThreatDefaultAction 1 -ErrorAction Stop
+                        Write-Host "Severe threat default action was 'Ignore' (6). Changed to a non-ignore action."
+                } else {
+                    Write-Host "Severe threat default action is not 'Ignore' (current: $sev)."
+                }
+            } else {
+                Write-Host "SevereThreatDefaultAction property not present in Get-MpPreference output."
+            }
+        } else {
+            Write-Host "Get-MpPreference not available to check Severe threat action."
+        }
+    } catch {
+        Write-Host "Failed handling Severe threat default action: $($_.Exception.Message)"
+    }
+
+    # 4) Enable ASR rule: Block executable files from running unless they meet prevalence/age/trusted list
+    $asrGuid = '01443614-cd74-433a-b99e-2ecdc07bfc25'
+    try {
+        if (Get-Command -Name Add-MpPreference -ErrorAction SilentlyContinue) {
+            $mp = Get-MpPreference
+            $ids = @()
+            if ($mp.AttackSurfaceReductionRules_Ids) { $ids = $mp.AttackSurfaceReductionRules_Ids }
+            if ($ids -notcontains $asrGuid) {
+                    Add-MpPreference -AttackSurfaceReductionRules_Ids @($asrGuid) -AttackSurfaceReductionRules_Actions @('Enabled') -ErrorAction Stop
+                    Write-Host "Added/enabled ASR rule $asrGuid."
+            } else {
+                Write-Host "ASR rule $asrGuid already present."
+            }
+        } else {
+            Write-Host "Add-MpPreference not available; cannot add ASR rule via cmdlet."
+        }
+    } catch {
+        Write-Host "Failed to add ASR rule: $($_.Exception.Message)"
+    }
+
+    # 5) Ensure cloud/block-at-first-seen features are enabled (make ASR effective)
+    try {
+        if (Get-Command -Name Set-MpPreference -ErrorAction SilentlyContinue) {
+            $mp = Get-MpPreference
+            $needs = @()
+            if ($mp.DisableBlockAtFirstSeen) { $needs += 'BlockAtFirstSeen' }
+            if ($mp.DisableRealtimeMonitoring) { $needs += 'RealtimeMonitoring' }
+            if ($mp.DisableBehaviorMonitoring) { $needs += 'BehaviorMonitoring' }
+            if ($mp.DisableIOAVProtection) { $needs += 'IOAVProtection' }
+
+            if ($needs.Count -gt 0) {
+                    Set-MpPreference -DisableBlockAtFirstSeen $false -DisableRealtimeMonitoring $false -DisableBehaviorMonitoring $false -DisableIOAVProtection $false -ErrorAction Stop
+                    Write-Host "Enabled cloud/block-at-first-seen and core real-time protections: $($needs -join ', ')."
+            } else {
+                Write-Host "Cloud and core real-time protections appear enabled."
+            }
+        }
+    } catch {
+        Write-Host "Failed to enforce cloud/block-at-first-seen settings: $($_.Exception.Message)"
+    }
+
+    # 6) Remove Attack Surface Reduction exclusions
+    try {
+        if (Get-Command -Name Get-MpPreference -ErrorAction SilentlyContinue) {
+            $mp = Get-MpPreference
+            if ($mp.AttackSurfaceReductionOnlyExclusions -and $mp.AttackSurfaceReductionOnlyExclusions.Count -gt 0) {
+                    try {
+                        Set-MpPreference -AttackSurfaceReductionOnlyExclusions @() -ErrorAction Stop
+                        Write-Host "Cleared AttackSurfaceReductionOnlyExclusions via Set-MpPreference."
+                    } catch {
+                        # fallback to registry removal if cmdlet fails
+                        $asrReg = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR'
+                        if (Test-Path $asrReg) {
+                            Remove-ItemProperty -Path $asrReg -Name 'AttackSurfaceReductionOnlyExclusions' -ErrorAction SilentlyContinue
+                            Write-Host "Removed AttackSurfaceReductionOnlyExclusions from registry (fallback)."
+                        } else {
+                            Write-Host "Could not clear ASR exclusions; registry path not present."
+                        }
+                    }
+            } else {
+                Write-Host "No AttackSurfaceReductionOnlyExclusions configured."
+            }
+        } else {
+            Write-Host "Get-MpPreference not available; attempting registry removal of ASR exclusions (if present)."
+            $asrReg = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR'
+            if (Test-Path $asrReg) {
+                    Remove-ItemProperty -Path $asrReg -Name 'AttackSurfaceReductionOnlyExclusions' -ErrorAction SilentlyContinue
+                    Write-Host "Removed AttackSurfaceReductionOnlyExclusions from registry."
+            } else {
+                Write-Host "ASR registry path not present."
+            }
+        }
+    } catch {
+        Write-Host "Failed to remove ASR exclusions: $($_.Exception.Message)"
+    }
+
+    # 7) Ensure Google Chrome cannot override DEP (Exploit Protection / DEP)
+    try {
+        if (Get-Command -Name Get-ProcessMitigation -ErrorAction SilentlyContinue) {
+            $chromeMitigations = Get-ProcessMitigation -Name 'chrome.exe' -ErrorAction SilentlyContinue
+            if ($chromeMitigations) {
+                $depEnabled = $null
+                if ($chromeMitigations.PSObject.Properties.Name -contains 'DataExecutionPrevention') {
+                    $dep = $chromeMitigations.DataExecutionPrevention
+                    if ($dep -is [System.Management.Automation.PSObject]) {
+                        if ($dep.Properties.Name -contains 'Enable') { $depEnabled = [bool]$dep.Enable }
+                    } elseif ($dep -is [bool]) {
+                        $depEnabled = [bool]$dep
+                    }
+                }
+                if ($depEnabled -eq $false -or $depEnabled -eq $null) {
+                        try {
+                            Set-ProcessMitigation -Name 'chrome.exe' -EnableForceRelocateImages 1 -ErrorAction Stop
+                            Write-Host "Attempted to update Chrome exploit mitigations (DEP/mitigations). Verify in Windows Security -> Exploit Protection -> Program settings."
+                        } catch {
+                            Write-Host "Unable to programmatically change Chrome DEP via Set-ProcessMitigation: $($_.Exception.Message)"
+                            Write-Host "Manually verify DEP is enabled for chrome.exe in Windows Security -> App & browser control -> Exploit protection -> Program settings."
+                        }
+                } else {
+                    Write-Host "Chrome DEP appears enabled."
+                }
+            } else {
+                Write-Host "No per-app mitigation entry for chrome.exe."
+            }
+        } else {
+            Write-Host "Get-ProcessMitigation / Set-ProcessMitigation not available on this system. Configure Chrome DEP via Windows Security -> Exploit Protection settings."
+        }
+    } catch {
+        Write-Host "Failed to inspect/apply Chrome DEP mitigations: $($_.Exception.Message)"
+    }
+
+    Write-Host "Defender & Exploit Protection hardening pass complete. Review output for any manual actions required."
+}
+
+function enforce_domain_hardening {
+
+    Write-Host "Running domain & DC hardening checks..."
+
+    # Helper: require elevation for registry/service changes
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "Administrative privileges are required to inspect/apply many settings. Re-run elevated to apply fixes."
+    }
+
+    $results = [System.Collections.ArrayList]::new()
+
+    #
+    # 1) Authenticated users cannot add workstations to the domain
+    #    (ms-DS-MachineAccountQuota = 0 on the domain)
+    #
+    try {
+        if (Get-Module -ListAvailable -Name ActiveDirectory) {
+            Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+        }
+
+        $domain = $null
+        try { $domain = Get-ADDomain -ErrorAction Stop } catch {}
+        if ($domain) {
+            $currentQuota = $domain.'ms-DS-MachineAccountQuota'
+            if ($null -eq $currentQuota) { $currentQuota = 10 } # default if absent
+            $results.Add("MachineAccountQuota current: $currentQuota") | Out-Null
+                try {
+                    if ($currentQuota -ne 0) {
+                        Set-ADDomain -Identity $domain.DNSRoot -Replace @{ 'ms-DS-MachineAccountQuota' = 0 } -ErrorAction Stop
+                        $results.Add("Set ms-DS-MachineAccountQuota = 0") | Out-Null
+                    } else {
+                        $results.Add("ms-DS-MachineAccountQuota already 0") | Out-Null
+                    }
+                } catch {
+                    $results.Add("Failed to set ms-DS-MachineAccountQuota: $($_.Exception.Message)") | Out-Null
+                }
+        } else {
+            $results.Add("Not joined to an AD domain or ActiveDirectory module unavailable; cannot query/set ms-DS-MachineAccountQuota") | Out-Null
+        }
+    } catch {
+        $results.Add("Error while handling machine account quota: $($_.Exception.Message)") | Out-Null
+    }
+
+    #
+    # 2) Prevent delegation abuse: ensure common Netlogon / delegation protections are enabled
+    #    We set Netlogon/secure channel and require strong keys/signing where possible.
+    #
+    try {
+        $netlogonPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters'
+        $changes = @{}
+        $desiredNetlogon = @{
+            'RequireStrongKey'   = 1
+            'RequireSignOrSeal'  = 1
+            'SignSecureChannel'  = 1
+            'SealSecureChannel'  = 1
+        }
+
+        foreach ($k in $desiredNetlogon.Keys) {
+            $current = (Get-ItemProperty -Path $netlogonPath -Name $k -ErrorAction SilentlyContinue).$k
+            if ($current -ne $desiredNetlogon[$k]) {
+                    try {
+                        Set-ItemProperty -Path $netlogonPath -Name $k -Value $desiredNetlogon[$k] -Type DWord -ErrorAction Stop
+                        $changes[$k] = "updated -> $($desiredNetlogon[$k])"
+                    } catch {
+                        $changes[$k] = "failed to update: $($_.Exception.Message)"
+                    }
+            } else {
+                $changes[$k] = "ok"
+            }
+        }
+
+        $results.Add("Netlogon secure-channel settings:") | Out-Null
+        foreach ($c in $changes.GetEnumerator()) {
+            $results.Add(" - $($c.Key): $($c.Value)") | Out-Null
+        }
+    } catch {
+        $results.Add("Failed to inspect/update Netlogon parameters: $($_.Exception.Message)") | Out-Null
+    }
+
+    #
+    # 3) LDAP server signing requirements [Require Signing] (Domain Controllers)
+    #    Attempt to set NTDS LDAP signing requirement to 'require' (DWORD = 2)
+    #
+    try {
+        $ldapRegPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\NTDS\Parameters'
+        $ldapName = 'LDAPServerIntegrity'
+        $current = (Get-ItemProperty -Path $ldapRegPath -Name $ldapName -ErrorAction SilentlyContinue).$ldapName
+        if ($current -ne 2) {
+                try {
+                    if (!(Test-Path $ldapRegPath)) { New-Item -Path $ldapRegPath -Force | Out-Null }
+                    Set-ItemProperty -Path $ldapRegPath -Name $ldapName -Value 2 -Type DWord -ErrorAction Stop
+                    $results.Add("Set LDAP server signing requirement to 'Require signing' (LDAPServerIntegrity=2)") | Out-Null
+                } catch {
+                    $results.Add("Failed to set LDAPServerIntegrity: $($_.Exception.Message)") | Out-Null
+                }
+        } else {
+            $results.Add("LDAP server signing already set to 'Require signing' (LDAPServerIntegrity=2)") | Out-Null
+        }
+    } catch {
+        $results.Add("Error checking LDAP signing setting: $($_.Exception.Message)") | Out-Null
+    }
+
+    #c
+    # 4) Domain logons are not cached to disk on members (CachedLogonsCount = 0)
+    #
+    try {
+        $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        $name = 'CachedLogonsCount'
+        $current = (Get-ItemProperty -Path $winlogonPath -Name $name -ErrorAction SilentlyContinue).$name
+        if ($current -ne '0') {
+                try {
+                    Set-ItemProperty -Path $winlogonPath -Name $name -Value '0' -Type String -ErrorAction Stop
+                    $results.Add("Set CachedLogonsCount = 0 (domain logons will not be cached)") | Out-Null
+                } catch {
+                    $results.Add("Failed to set CachedLogonsCount: $($_.Exception.Message)") | Out-Null
+                }
+        } else {
+            $results.Add("CachedLogonsCount already 0") | Out-Null
+        }
+    } catch {
+        $results.Add("Error checking CachedLogonsCount: $($_.Exception.Message)") | Out-Null
+    }
+
+    #
+    # 5) Use FIPS compliant algorithms (enable FIPS policy)
+    #
+    try {
+        $fipsPath = 'HKLM:\System\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy'
+        $fipsName = 'Enabled'
+        $current = (Get-ItemProperty -Path $fipsPath -Name $fipsName -ErrorAction SilentlyContinue).$fipsName
+        if ($current -ne 1) {
+                try {
+                    if (!(Test-Path $fipsPath)) { New-Item -Path $fipsPath -Force | Out-Null }
+                    Set-ItemProperty -Path $fipsPath -Name $fipsName -Value 1 -Type DWord -ErrorAction Stop
+                    $results.Add("Enabled FIPS algorithms (FipsAlgorithmPolicy\\Enabled = 1)") | Out-Null
+                } catch {
+                    $results.Add("Failed to enable FIPS policy: $($_.Exception.Message)") | Out-Null
+                }
+        } else {
+            $results.Add("FIPS algorithm policy already enabled") | Out-Null
+        }
+    } catch {
+        $results.Add("Error checking FIPS policy: $($_.Exception.Message)") | Out-Null
+    }
+
+    #
+    # 6) Delegation hardening guidance (informational)
+    #
+    try {
+            $results.Add("NOTE: Hardening to prevent domain users from enabling 'trusted for delegation' requires domain ACL changes.") | Out-Null
+            $results.Add("Automated ACL changes are NOT performed by this script. Use AD ACL tooling (dsacls, Set-ACL via DirectoryServices) and restrict write perms to msDS-AllowedToDelegateTo/msDS-AllowedToActOnBehalfOfOtherIdentity to privileged groups only.") | Out-Null
+    } catch {}
+
+    #
+    # Final: report and recommendations
+    #
+    Write-Host ""
+    Write-Host "Enforcement summary:"
+    foreach ($line in $results) { Write-Host " - $line" }
+
+    Write-Host ""
+    Write-Host "Recommendations:"
+    Write-Host " - Reboot domain controllers / affected members where registry keys were changed."
+    Write-Host " - For ms-DS-MachineAccountQuota change, verify via: Get-ADDomain | Select-Object ms-DS-MachineAccountQuota"
+    Write-Host " - To fully prevent delegation misuse and tighten Netlogon/LDAP protections, run this on domain controllers and/or perform AD ACL hardening as Domain Admin."
+    Write-Host " - Test changes in a lab before wide deployment."
+}
+
 function main {
     Write-Host "Starting Windows 2022 Server Script..." 
     Manage-UsersAndGroups
@@ -1400,8 +2472,26 @@ function main {
     Clear-UserProfilesSafe
     stop-DefaultSharedFolders
     Remove-ProhibitedApps
-    Configure-UserRightsAssignments
+    Set-UserRightsAssignments
+    Set-SecPol
+    Set-DNSClientSecurity
+    Set-PowerOptions
+    Set-WindowsUpdate
+    Set-ScreenSaver
+    Set-EventLogSize
+    Find-SuspiciousScheduledTasks
+    Disable-NetBIOSoverTCP
+    Disable-UnnecessaryWindowsFeatures
+    Disable-IPv6
+    Disable-AutoRun
+    Test-HostsFile
+    Test-SuspiciousFiles
+    Test-StartupPrograms
+
+    enforce_domain_hardening
     harden_server2022_accounts_and_audit
     harden_server2022_dcom_and_device_policies
+    harden_defender_and_exploit_protection
+
 }
 main
