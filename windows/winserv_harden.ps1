@@ -2609,44 +2609,2089 @@ function Set-WindowsDefender {
     }
 }
 
+function Enable-WindowsSmartScreen {
+    Write-Host "Enabling Windows SmartScreen..." -ForegroundColor Cyan
+    
+    try {
+        $smartScreenPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System"
+        if (-not (Test-Path $smartScreenPath)) {
+            New-Item -Path $smartScreenPath -Force | Out-Null
+        }
+        
+        $currentEnabled = (Get-ItemProperty -Path $smartScreenPath -Name "EnableSmartScreen" -ErrorAction SilentlyContinue).EnableSmartScreen
+        $currentLevel = (Get-ItemProperty -Path $smartScreenPath -Name "ShellSmartScreenLevel" -ErrorAction SilentlyContinue).ShellSmartScreenLevel
+        
+        if ($currentEnabled -eq 1 -and $currentLevel -eq "Block") {
+            Write-Host "  ✓ Windows SmartScreen already configured correctly" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $smartScreenPath -Name "EnableSmartScreen" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path $smartScreenPath -Name "ShellSmartScreenLevel" -Value "Block" -Type String -Force
+        
+        Write-Host "  ✓ Windows SmartScreen enabled" -ForegroundColor Green
+    } catch {
+        Write-Host "  ⚠ Error enabling SmartScreen: $_" -ForegroundColor Red
+    }
+}
+
+function Set-SMBSecurity {
+    Write-Host "Configuring SMB security settings..." -ForegroundColor Cyan
+    
+    try {
+        $lanmanServerPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanServer"
+        $lanmanWorkstationPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LanmanWorkstation"
+        
+        if (-not (Test-Path $lanmanServerPath)) {
+            New-Item -Path $lanmanServerPath -Force | Out-Null
+        }
+        if (-not (Test-Path $lanmanWorkstationPath)) {
+            New-Item -Path $lanmanWorkstationPath -Force | Out-Null
+        }
+        
+        $changes = @()
+        
+        # Enable SMB over QUIC
+        $smbQuicServer = (Get-ItemProperty -Path $lanmanServerPath -Name "EnableSMBQUIC" -ErrorAction SilentlyContinue).EnableSMBQUIC
+        $smbQuicClient = (Get-ItemProperty -Path $lanmanWorkstationPath -Name "EnableSMBQUIC" -ErrorAction SilentlyContinue).EnableSMBQUIC
+        
+        if ($smbQuicServer -ne 1) {
+            Set-ItemProperty -Path $lanmanServerPath -Name "EnableSMBQUIC" -Value 1 -Type DWord -Force
+            $changes += "SMB over QUIC (Server)"
+        }
+        
+        if ($smbQuicClient -ne 1) {
+            Set-ItemProperty -Path $lanmanWorkstationPath -Name "EnableSMBQUIC" -Value 1 -Type DWord -Force
+            $changes += "SMB over QUIC (Client)"
+        }
+        
+        # Block NTLM
+        $blockNtlm = (Get-ItemProperty -Path $lanmanWorkstationPath -Name "BlockNTLM" -ErrorAction SilentlyContinue).BlockNTLM
+        if ($blockNtlm -ne 1) {
+            Set-ItemProperty -Path $lanmanWorkstationPath -Name "BlockNTLM" -Value 1 -Type DWord -Force
+            $changes += "Block NTLM"
+        }
+        
+        # Set minimum SMB version to 3.0.0
+        $minSmb = (Get-ItemProperty -Path $lanmanServerPath -Name "MinSmb2Dialect" -ErrorAction SilentlyContinue).MinSmb2Dialect
+        if ($minSmb -ne 300) {
+            Set-ItemProperty -Path $lanmanServerPath -Name "MinSmb2Dialect" -Value 300 -Type DWord -Force
+            $changes += "Minimum SMB 3.0.0"
+        }
+        
+        # Enable authentication rate limiter
+        $rateLimiter = (Get-ItemProperty -Path $lanmanServerPath -Name "EnableAuthRateLimiter" -ErrorAction SilentlyContinue).EnableAuthRateLimiter
+        if ($rateLimiter -ne 1) {
+            Set-ItemProperty -Path $lanmanServerPath -Name "EnableAuthRateLimiter" -Value 1 -Type DWord -Force
+            $changes += "Auth rate limiter"
+        }
+        
+        # Set invalid authentication delay
+        $authDelay = (Get-ItemProperty -Path $lanmanServerPath -Name "InvalidAuthenticationDelayTimeInMs" -ErrorAction SilentlyContinue).InvalidAuthenticationDelayTimeInMs
+        if ($authDelay -ne 2000) {
+            Set-ItemProperty -Path $lanmanServerPath -Name "InvalidAuthenticationDelayTimeInMs" -Value 2000 -Type DWord -Force
+            $changes += "Auth delay (2000ms)"
+        }
+        
+        if ($changes.Count -eq 0) {
+            Write-Host "  ✓ SMB security already configured correctly" -ForegroundColor Green
+        } else {
+            Write-Host "  ✓ SMB security configured: $($changes -join ', ')" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring SMB security: $_" -ForegroundColor Red
+    }
+}
+
+function Secure-CAPolicy {
+    Write-Host "Securing Certificate Authority policy file..." -ForegroundColor Cyan
+    
+    try {
+        $caPolicyPath = "$env:SystemRoot\System32\CAPolicy.inf"
+        
+        if (-not (Test-Path $caPolicyPath)) {
+            Write-Host "  ℹ CAPolicy.inf not found (not a CA server)" -ForegroundColor Gray
+            return
+        }
+        
+        $acl = Get-Acl $caPolicyPath
+        
+        # Check if Everyone has full control
+        $everyoneSid = New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0")
+        $accessRules = $acl.Access | Where-Object { 
+            $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]) -eq $everyoneSid -and
+            $_.FileSystemRights -eq "FullControl"
+        }
+        
+        if (-not $accessRules) {
+            Write-Host "  ✓ CAPolicy.inf permissions already secure" -ForegroundColor Green
+            return
+        }
+        
+        foreach ($rule in $accessRules) {
+            $acl.RemoveAccessRule($rule) | Out-Null
+        }
+        Set-Acl -Path $caPolicyPath -AclObject $acl
+        Write-Host "  ✓ Removed insecure Everyone permissions from CAPolicy.inf" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error securing CAPolicy.inf: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-ADCSDisallowedCertAutoUpdate {
+    Write-Host "Enabling AD CS disallowed cert auto update..." -ForegroundColor Cyan
+    
+    try {
+        $certPath = "HKLM:\SOFTWARE\Policies\Microsoft\SystemCertificates\AuthRoot"
+        if (-not (Test-Path $certPath)) {
+            New-Item -Path $certPath -Force | Out-Null
+        }
+        
+        $currentValue = (Get-ItemProperty -Path $certPath -Name "EnableDisallowedCertAutoUpdate" -ErrorAction SilentlyContinue).EnableDisallowedCertAutoUpdate
+        
+        if ($currentValue -eq 1) {
+            Write-Host "  ✓ AD CS disallowed cert auto update already enabled" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $certPath -Name "EnableDisallowedCertAutoUpdate" -Value 1 -Type DWord -Force
+        Write-Host "  ✓ AD CS disallowed cert auto update enabled" -ForegroundColor Green
+    } catch {
+        Write-Host "  ⚠ Error enabling AD CS cert auto update: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-VBSMandatoryMode {
+    Write-Host "Enabling Virtualization Based Security in Mandatory Mode..." -ForegroundColor Cyan
+    
+    try {
+        $deviceGuardPath = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard"
+        if (-not (Test-Path $deviceGuardPath)) {
+            New-Item -Path $deviceGuardPath -Force | Out-Null
+        }
+        
+        $currentValue = (Get-ItemProperty -Path $deviceGuardPath -Name "Mandatory" -ErrorAction SilentlyContinue).Mandatory
+        
+        if ($currentValue -eq 1) {
+            Write-Host "  ✓ VBS Mandatory Mode already enabled" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $deviceGuardPath -Name "Mandatory" -Value 1 -Type DWord -Force
+        Write-Host "  ✓ VBS Mandatory Mode enabled (helps prevent downdate vulnerability CVE-2024-21302)" -ForegroundColor Green
+    } catch {
+        Write-Host "  ⚠ Error enabling VBS Mandatory Mode: $_" -ForegroundColor Red
+    }
+}
+
+function Set-MachineIdentityIsolation {
+    Write-Host "Configuring Machine Identity Isolation..." -ForegroundColor Cyan
+    
+    try {
+        $deviceGuardPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeviceGuard"
+        if (-not (Test-Path $deviceGuardPath)) {
+            New-Item -Path $deviceGuardPath -Force | Out-Null
+        }
+        
+        $currentValue = (Get-ItemProperty -Path $deviceGuardPath -Name "MachineIdentityIsolation" -ErrorAction SilentlyContinue).MachineIdentityIsolation
+        
+        if ($currentValue -eq 2) {
+            Write-Host "  ✓ Machine Identity Isolation already set to enforcement mode" -ForegroundColor Green
+            return
+        }
+        
+        # Set to 1 for audit mode, 2 for enforcement mode
+        Set-ItemProperty -Path $deviceGuardPath -Name "MachineIdentityIsolation" -Value 2 -Type DWord -Force
+        Write-Host "  ✓ Machine Identity Isolation set to enforcement mode" -ForegroundColor Green
+    } catch {
+        Write-Host "  ⚠ Error configuring Machine Identity Isolation: $_" -ForegroundColor Red
+    }
+}
+
+function Set-BrowserDoNotTrack {
+    Write-Host "Configuring browser Do Not Track settings..." -ForegroundColor Cyan
+    
+    try {
+        $changes = @()
+        
+        # Configure Chrome
+        $chromePath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
+        $chromeInstalled = Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe"
+        
+        if ($chromeInstalled) {
+            if (-not (Test-Path $chromePath)) {
+                New-Item -Path $chromePath -Force | Out-Null
+            }
+            
+            $chromeValue = (Get-ItemProperty -Path $chromePath -Name "EnableDoNotTrack" -ErrorAction SilentlyContinue).EnableDoNotTrack
+            if ($chromeValue -ne 1) {
+                Set-ItemProperty -Path $chromePath -Name "EnableDoNotTrack" -Value 1 -Type DWord -Force
+                $changes += "Chrome"
+            }
+        }
+        
+        # Configure Firefox
+        $firefoxPath = "HKLM:\SOFTWARE\Policies\Mozilla\Firefox"
+        $firefoxInstalled = Test-Path "C:\Program Files\Mozilla Firefox\firefox.exe"
+        
+        if ($firefoxInstalled) {
+            if (-not (Test-Path $firefoxPath)) {
+                New-Item -Path $firefoxPath -Force | Out-Null
+            }
+            
+            $firefoxValue = (Get-ItemProperty -Path $firefoxPath -Name "EnableTrackingProtection" -ErrorAction SilentlyContinue).EnableTrackingProtection
+            if ($firefoxValue -ne 1) {
+                Set-ItemProperty -Path $firefoxPath -Name "EnableTrackingProtection" -Value 1 -Type DWord -Force
+                $changes += "Firefox"
+            }
+        }
+        
+        # Configure Edge
+        $edgePath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+        $edgeInstalled = Test-Path "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+        
+        if ($edgeInstalled) {
+            if (-not (Test-Path $edgePath)) {
+                New-Item -Path $edgePath -Force | Out-Null
+            }
+            
+            $edgeValue = (Get-ItemProperty -Path $edgePath -Name "ConfigureDoNotTrack" -ErrorAction SilentlyContinue).ConfigureDoNotTrack
+            if ($edgeValue -ne 1) {
+                Set-ItemProperty -Path $edgePath -Name "ConfigureDoNotTrack" -Value 1 -Type DWord -Force
+                $changes += "Edge"
+            }
+        }
+        
+        if ($changes.Count -eq 0) {
+            if ($chromeInstalled -or $firefoxInstalled -or $edgeInstalled) {
+                Write-Host "  ✓ Browser Do Not Track already configured" -ForegroundColor Green
+            } else {
+                Write-Host "  ℹ No supported browsers found installed" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "  ✓ Do Not Track configured for: $($changes -join ', ')" -ForegroundColor Green
+            Write-Host "  ℹ Users may also need to enable this in browser settings" -ForegroundColor Gray
+        }
+    } catch {
+        Write-Host "  ⚠ Error configuring browser Do Not Track: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-PowerShell2 {
+    Write-Host "Checking PowerShell 2.0 status..." -ForegroundColor Cyan
+    
+    try {
+        $ps2Feature = Get-WindowsOptionalFeature -Online -FeatureName "MicrosoftWindowsPowerShellV2" -ErrorAction SilentlyContinue
+        
+        if (-not $ps2Feature) {
+            Write-Host "  ✓ PowerShell 2.0 feature not present on this system" -ForegroundColor Green
+            return
+        }
+        
+        if ($ps2Feature.State -eq "Disabled") {
+            Write-Host "  ✓ PowerShell 2.0 already disabled" -ForegroundColor Green
+            return
+        }
+        
+        Write-Host "  ⚠ PowerShell 2.0 is currently enabled" -ForegroundColor Yellow
+        Write-Host "  ℹ PowerShell 2.0 should be disabled after this script completes" -ForegroundColor Gray
+        Write-Host "  ℹ Run this command after the script finishes:" -ForegroundColor Gray
+        Write-Host "    Disable-WindowsOptionalFeature -Online -FeatureName MicrosoftWindowsPowerShellV2 -NoRestart -Remove" -ForegroundColor White
+        
+    } catch {
+        Write-Host "  ⚠ Error checking PowerShell 2.0: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-DefenderASRWebshellRule {
+    Write-Host "Enabling Defender ASR rule to block webshell creation..." -ForegroundColor Cyan
+    
+    try {
+        if (-not (Get-Command -Name Get-MpPreference -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ Windows Defender cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $webshellRuleId = "a8f5898e-1dc8-49a9-9878-85004b8a61e6"
+        
+        $mp = Get-MpPreference -ErrorAction SilentlyContinue
+        if (-not $mp) {
+            Write-Host "  ⚠ Unable to query Defender preferences" -ForegroundColor Yellow
+            return
+        }
+        
+        $existingRules = @()
+        if ($mp.AttackSurfaceReductionRules_Ids) {
+            $existingRules = $mp.AttackSurfaceReductionRules_Ids
+        }
+        
+        if ($existingRules -contains $webshellRuleId) {
+            Write-Host "  ✓ Defender ASR webshell rule already enabled" -ForegroundColor Green
+            return
+        }
+        
+        Add-MpPreference -AttackSurfaceReductionRules_Ids $webshellRuleId -AttackSurfaceReductionRules_Actions Enabled -ErrorAction Stop
+        Write-Host "  ✓ Defender ASR webshell blocking rule enabled" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error enabling Defender ASR webshell rule: $_" -ForegroundColor Red
+    }
+}
+
+function Find-TamperedVBSScripts {
+    Write-Host "Checking for tampered VBS scripts..." -ForegroundColor Cyan
+    
+    try {
+        $systemVbsPath = "$env:SystemRoot\System32"
+        $systemWowVbsPath = "$env:SystemRoot\SysWOW64"
+        
+        $knownVbsFiles = @(
+            "$systemVbsPath\slmgr.vbs",
+            "$systemVbsPath\winrm.vbs",
+            "$systemWowVbsPath\slmgr.vbs",
+            "$systemWowVbsPath\winrm.vbs"
+        )
+        
+        Write-Host "  ℹ System VBS file hashes (verify against clean baseline):" -ForegroundColor Gray
+        
+        $foundFiles = 0
+        foreach ($vbsFile in $knownVbsFiles) {
+            if (Test-Path $vbsFile) {
+                $hash = (Get-FileHash -Path $vbsFile -Algorithm SHA256).Hash
+                Write-Host "    $vbsFile" -ForegroundColor White
+                Write-Host "      SHA256: $hash" -ForegroundColor Gray
+                $foundFiles++
+            }
+        }
+        
+        if ($foundFiles -eq 0) {
+            Write-Host "  ℹ No system VBS files found to check" -ForegroundColor Gray
+        } else {
+            Write-Host "  ℹ Compare these hashes with a baseline Windows Server 2022 system" -ForegroundColor Yellow
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking VBS scripts: $_" -ForegroundColor Red
+    }
+}
+
+function Test-ShareCreationEvents {
+    Write-Host "Checking file shares..." -ForegroundColor Cyan
+    
+    try {
+        $shares = Get-SmbShare -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '^(ADMIN\$|IPC\$|[A-Z]\$)$' }
+        
+        if (-not $shares -or $shares.Count -eq 0) {
+            Write-Host "  ✓ No custom file shares found" -ForegroundColor Green
+            return
+        }
+        
+        Write-Host "  ℹ Current non-default shares found:" -ForegroundColor Yellow
+        $shares | Select-Object Name, Path, Description | Format-Table -AutoSize
+        
+        Write-Host "  ℹ To check when shares were created:" -ForegroundColor Gray
+        Write-Host "    Event Viewer -> Windows Logs -> Security -> Filter by Event ID 5142" -ForegroundColor Gray
+        
+    } catch {
+        Write-Host "  ⚠ Error checking shares: $_" -ForegroundColor Red
+    }
+}
+
+function Set-AdvancedAuditPolicy {
+    Write-Host "Configuring advanced audit policies..." -ForegroundColor Cyan
+    
+    try {
+        $changes = @()
+        
+        # Check Computer Account Management
+        $compAcctOutput = auditpol /get /subcategory:"Computer Account Management" 2>&1
+        if ($compAcctOutput -notmatch "Success and Failure") {
+            auditpol /set /subcategory:"Computer Account Management" /success:enable /failure:enable | Out-Null
+            $changes += "Computer Account Management"
+        }
+        
+        # Check SAM auditing
+        $samOutput = auditpol /get /subcategory:"SAM" 2>&1
+        if ($samOutput -notmatch "Success and Failure") {
+            auditpol /set /subcategory:"SAM" /success:enable /failure:enable | Out-Null
+            $changes += "SAM"
+        }
+        
+        # Check Certification Services auditing
+        $certOutput = auditpol /get /subcategory:"Certification Services" 2>&1
+        if ($certOutput -notmatch "Success and Failure") {
+            auditpol /set /subcategory:"Certification Services" /success:enable /failure:enable | Out-Null
+            $changes += "Certification Services"
+        }
+        
+        if ($changes.Count -eq 0) {
+            Write-Host "  ✓ Advanced audit policies already configured" -ForegroundColor Green
+        } else {
+            Write-Host "  ✓ Configured audit policies: $($changes -join ', ')" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring advanced audit policies: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-AnonymousSAMEnumeration {
+    Write-Host "Restricting anonymous access..." -ForegroundColor Cyan
+    
+    try {
+        $changes = @()`
+        
+        $lsaPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+        
+        # Check anonymous SAM enumeration
+        $currentSAM = (Get-ItemProperty -Path $lsaPath -Name "RestrictAnonymousSAM" -ErrorAction SilentlyContinue).RestrictAnonymousSAM
+        if ($currentSAM -ne 1) {
+            Set-ItemProperty -Path $lsaPath -Name "RestrictAnonymousSAM" -Value 1 -Type DWord -Force
+            $changes += "Anonymous SAM enumeration restricted"
+        }
+        
+        # Check CD-ROM restriction
+        $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+        $currentCDRom = (Get-ItemProperty -Path $winlogonPath -Name "AllocateCDRoms" -ErrorAction SilentlyContinue).AllocateCDRoms
+        if ($currentCDRom -ne 1) {
+            Set-ItemProperty -Path $winlogonPath -Name "AllocateCDRoms" -Value 1 -Type DWord -Force
+            $changes += "CD-ROM access restricted to local users"
+        }
+        
+        if ($changes.Count -eq 0) {
+            Write-Host "  ✓ Anonymous access restrictions already configured" -ForegroundColor Green
+        } else {
+            Write-Host "  ✓ Configured: $($changes -join ', ')" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error restricting anonymous access: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-LSAProtection {
+    Write-Host "Enabling Additional LSA Protection (RunAsPPL)..." -ForegroundColor Cyan
+    
+    try {
+        $lsaPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+        
+        $currentValue = (Get-ItemProperty -Path $lsaPath -Name "RunAsPPL" -ErrorAction SilentlyContinue).RunAsPPL
+        
+        if ($currentValue -eq 1) {
+            Write-Host "  ✓ LSA Protection (RunAsPPL) already enabled" -ForegroundColor Green
+            return
+        }
+        
+        if (-not (Test-Path $lsaPath)) {
+            New-Item -Path $lsaPath -Force | Out-Null
+        }
+        
+        Set-ItemProperty -Path $lsaPath -Name "RunAsPPL" -Value 1 -Type DWord -Force
+        Write-Host "  ✓ LSA Protection enabled (prevents credential dumping attacks like Mimikatz)" -ForegroundColor Green
+        Write-Host "  ⚠ A system restart is required for this change to take effect" -ForegroundColor Yellow
+        
+    } catch {
+        Write-Host "  ⚠ Error enabling LSA Protection: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-AnonymousLDAPBind {
+    Write-Host "Disabling Anonymous LDAP Bind..." -ForegroundColor Cyan
+    
+    try {
+        # Check if this is a domain controller
+        $isDC = (Get-WmiObject -Class Win32_ComputerSystem).DomainRole -ge 4
+        
+        if (-not $isDC) {
+            Write-Host "  ℹ This is not a Domain Controller, skipping LDAP configuration" -ForegroundColor Gray
+            return
+        }
+        
+        # Check if Active Directory module is available
+        if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+            Write-Host "  ⚠ Active Directory module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+        
+        Write-Host "  ℹ To disable anonymous LDAP operations:" -ForegroundColor Yellow
+        Write-Host "    1. Open ADSI Edit" -ForegroundColor White
+        Write-Host "    2. Connect to Configuration naming context" -ForegroundColor White
+        Write-Host "    3. Navigate to: CN=Directory Service,CN=Windows NT,CN=Services,CN=Configuration,DC=<domain>" -ForegroundColor White
+        Write-Host "    4. In dsHeuristics property, change 7th character from '2' to '0'" -ForegroundColor White
+        Write-Host "    5. Example: '0000002' should become '0000000'" -ForegroundColor White
+        Write-Host "  ℹ This prevents anonymous LDAP enumeration attacks" -ForegroundColor Gray
+        
+    } catch {
+        Write-Host "  ⚠ Error checking LDAP configuration: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-KerberosPreAuthBypass {
+    Write-Host "Checking Kerberos Pre-Authentication settings..." -ForegroundColor Cyan
+    
+    try {
+        # Check if this is a domain environment
+        $isDomain = (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+        
+        if (-not $isDomain) {
+            Write-Host "  ℹ Not in a domain environment, skipping Kerberos check" -ForegroundColor Gray
+            return
+        }
+        
+        # Check if Active Directory module is available
+        if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+            Write-Host "  ⚠ Active Directory module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+        
+        # Get all users with Kerberos pre-auth disabled
+        $usersWithoutPreAuth = Get-ADUser -Filter {DoesNotRequirePreAuth -eq $true} -Properties DoesNotRequirePreAuth -ErrorAction SilentlyContinue
+        
+        if ($usersWithoutPreAuth) {
+            Write-Host "  ⚠ Found $($usersWithoutPreAuth.Count) user(s) with Kerberos Pre-Authentication disabled:" -ForegroundColor Yellow
+            foreach ($user in $usersWithoutPreAuth) {
+                Write-Host "    - $($user.SamAccountName)" -ForegroundColor White
+            }
+            
+            $fix = Read-Host "Enable Kerberos Pre-Authentication for these users? (Y/N)"
+            if ($fix -match '^[Yy]') {
+                foreach ($user in $usersWithoutPreAuth) {
+                    try {
+                        Set-ADAccountControl -Identity $user -DoesNotRequirePreAuth $false -ErrorAction Stop
+                        Write-Host "    ✓ Enabled Pre-Auth for $($user.SamAccountName)" -ForegroundColor Green
+                    } catch {
+                        Write-Host "    ⚠ Failed to update $($user.SamAccountName): $_" -ForegroundColor Red
+                    }
+                }
+            }
+        } else {
+            Write-Host "  ✓ All domain users have Kerberos Pre-Authentication enabled" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking Kerberos settings: $_" -ForegroundColor Red
+    }
+}
+
+function Test-PasswordExpiration {
+    Write-Host "Checking password expiration settings..." -ForegroundColor Cyan
+    
+    try {
+        $isDomain = (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+        
+        if ($isDomain) {
+            # Domain environment - check AD users
+            if (Get-Module -ListAvailable -Name ActiveDirectory) {
+                Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+                
+                $usersNoExpiry = Get-ADUser -Filter {PasswordNeverExpires -eq $true -and Enabled -eq $true} -Properties PasswordNeverExpires -ErrorAction SilentlyContinue | 
+                    Where-Object { $_.SamAccountName -notmatch '^(Administrator|Guest|krbtgt)$' }
+                
+                if ($usersNoExpiry) {
+                    Write-Host "  ⚠ Found $($usersNoExpiry.Count) enabled user(s) with non-expiring passwords:" -ForegroundColor Yellow
+                    foreach ($user in $usersNoExpiry) {
+                        Write-Host "    - $($user.SamAccountName)" -ForegroundColor White
+                    }
+                    
+                    $fix = Read-Host "Enable password expiration for these users? (Y/N)"
+                    if ($fix -match '^[Yy]') {
+                        foreach ($user in $usersNoExpiry) {
+                            try {
+                                Set-ADUser -Identity $user -PasswordNeverExpires $false -ErrorAction Stop
+                                Write-Host "    ✓ Enabled expiration for $($user.SamAccountName)" -ForegroundColor Green
+                            } catch {
+                                Write-Host "    ⚠ Failed to update $($user.SamAccountName): $_" -ForegroundColor Red
+                            }
+                        }
+                    }
+                } else {
+                    Write-Host "  ✓ All enabled domain users have password expiration enabled" -ForegroundColor Green
+                }
+            }
+        } else {
+            # Local environment
+            $localUsersNoExpiry = Get-LocalUser -ErrorAction SilentlyContinue | 
+                Where-Object { $_.PasswordNeverExpires -eq $true -and $_.Enabled -eq $true -and $_.Name -notmatch '^(Administrator|Guest|DefaultAccount)$' }
+            
+            if ($localUsersNoExpiry) {
+                Write-Host "  ⚠ Found $($localUsersNoExpiry.Count) local user(s) with non-expiring passwords:" -ForegroundColor Yellow
+                foreach ($user in $localUsersNoExpiry) {
+                    Write-Host "    - $($user.Name)" -ForegroundColor White
+                }
+                
+                $fix = Read-Host "Enable password expiration for these users? (Y/N)"
+                if ($fix -match '^[Yy]') {
+                    foreach ($user in $localUsersNoExpiry) {
+                        try {
+                            Set-LocalUser -Name $user.Name -PasswordNeverExpires $false -ErrorAction Stop
+                            Write-Host "    ✓ Enabled expiration for $($user.Name)" -ForegroundColor Green
+                        } catch {
+                            Write-Host "    ⚠ Failed to update $($user.Name): $_" -ForegroundColor Red
+                        }
+                    }
+                }
+            } else {
+                Write-Host "  ✓ All enabled local users have password expiration enabled" -ForegroundColor Green
+            }
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking password expiration: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-PowerShellRemoting {
+    Write-Host "Checking PowerShell Remoting status..." -ForegroundColor Cyan
+    
+    try {
+        $winrmService = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+        
+        if (-not $winrmService) {
+            Write-Host "  ✓ WinRM service not present" -ForegroundColor Green
+            return
+        }
+        
+        # Check if WinRM is configured for remoting
+        $psRemotingEnabled = $false
+        try {
+            $null = Test-WSMan -ErrorAction Stop
+            $psRemotingEnabled = $true
+        } catch {
+            # Test-WSMan failed, remoting likely disabled
+        }
+        
+        if (-not $psRemotingEnabled -and $winrmService.Status -eq 'Stopped') {
+            Write-Host "  ✓ PowerShell Remoting already disabled" -ForegroundColor Green
+            return
+        }
+        
+        Write-Host "  ⚠ PowerShell Remoting appears to be enabled" -ForegroundColor Yellow
+        $disable = Read-Host "Disable PowerShell Remoting? (Y/N)"
+        
+        if ($disable -match '^[Yy]') {
+            try {
+                Disable-PSRemoting -Force -ErrorAction Stop
+                Stop-Service -Name WinRM -Force -ErrorAction Stop
+                Set-Service -Name WinRM -StartupType Disabled -ErrorAction Stop
+                Write-Host "  ✓ PowerShell Remoting disabled and WinRM service stopped" -ForegroundColor Green
+            } catch {
+                Write-Host "  ⚠ Error disabling PowerShell Remoting: $_" -ForegroundColor Red
+            }
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking PowerShell Remoting: $_" -ForegroundColor Red
+    }
+}
+
+function Test-DelegationRights {
+    Write-Host "Checking delegation rights..." -ForegroundColor Cyan
+    
+    try {
+        $isDomain = (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+        
+        if (-not $isDomain) {
+            Write-Host "  ℹ Not in a domain environment, skipping delegation check" -ForegroundColor Gray
+            return
+        }
+        
+        Write-Host "  ℹ Checking for overly permissive delegation settings..." -ForegroundColor Yellow
+        Write-Host "  ℹ To check and fix delegation rights:" -ForegroundColor Gray
+        Write-Host "    1. Open Group Policy Management" -ForegroundColor White
+        Write-Host "    2. Edit Default Domain Policy" -ForegroundColor White
+        Write-Host "    3. Navigate to: Computer Configuration > Policies > Windows Settings > Security Settings > Local Policies > User Rights Assignment" -ForegroundColor White
+        Write-Host "    4. Find: 'Enable computer and user accounts to be trusted for delegation'" -ForegroundColor White
+        Write-Host "    5. Remove 'Everyone' group if present" -ForegroundColor White
+        Write-Host "    6. Only Domain Admins should have this right" -ForegroundColor White
+        
+    } catch {
+        Write-Host "  ⚠ Error checking delegation rights: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-SMBCompression {
+    Write-Host "Disabling SMB Compression..." -ForegroundColor Cyan
+    
+    try {
+        $smbPath = "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters"
+        
+        $currentValue = (Get-ItemProperty -Path $smbPath -Name "DisableCompression" -ErrorAction SilentlyContinue).DisableCompression
+        
+        if ($currentValue -eq 1) {
+            Write-Host "  ✓ SMB Compression already disabled" -ForegroundColor Green
+            return
+        }
+        
+        if (-not (Test-Path $smbPath)) {
+            New-Item -Path $smbPath -Force | Out-Null
+        }
+        
+        Set-ItemProperty -Path $smbPath -Name "DisableCompression" -Value 1 -Type DWord -Force
+        Write-Host "  ✓ SMB Compression disabled (mitigates CVE-2020-0796 SMBGhost)" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error disabling SMB Compression: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-SMBEncryption {
+    Write-Host "Enabling SMB Server-wide Encryption..." -ForegroundColor Cyan
+    
+    try {
+        if (-not (Get-Command -Name Get-SmbServerConfiguration -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ SMB cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $smbConfig = Get-SmbServerConfiguration -ErrorAction SilentlyContinue
+        
+        if ($smbConfig.EncryptData -eq $true) {
+            Write-Host "  ✓ SMB Server-wide Encryption already enabled" -ForegroundColor Green
+            return
+        }
+        
+        Set-SmbServerConfiguration -EncryptData $true -Force -Confirm:$false -ErrorAction Stop
+        Write-Host "  ✓ SMB Server-wide Encryption enabled" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error enabling SMB Encryption: $_" -ForegroundColor Red
+    }
+}
+
+function Set-DNSSIGRedMitigation {
+    Write-Host "Applying DNS SIGRed (CVE-2020-1350) mitigation..." -ForegroundColor Cyan
+    
+    try {
+        # Check if DNS service exists
+        $dnsService = Get-Service -Name DNS -ErrorAction SilentlyContinue
+        
+        if (-not $dnsService) {
+            Write-Host "  ℹ DNS Server service not present, skipping SIGRed mitigation" -ForegroundColor Gray
+            return
+        }
+        
+        $dnsPath = "HKLM:\SYSTEM\CurrentControlSet\Services\DNS\Parameters"
+        
+        $currentValue = (Get-ItemProperty -Path $dnsPath -Name "TcpReceivePacketSize" -ErrorAction SilentlyContinue).TcpReceivePacketSize
+        
+        if ($currentValue -eq 0xFF00) {
+            Write-Host "  ✓ DNS SIGRed mitigation already applied" -ForegroundColor Green
+            return
+        }
+        
+        if (-not (Test-Path $dnsPath)) {
+            New-Item -Path $dnsPath -Force | Out-Null
+        }
+        
+        Set-ItemProperty -Path $dnsPath -Name "TcpReceivePacketSize" -Value 0xFF00 -Type DWord -Force
+        Write-Host "  ✓ DNS SIGRed mitigation applied (TcpReceivePacketSize set to 0xFF00)" -ForegroundColor Green
+        
+        # Restart DNS service
+        $restart = Read-Host "Restart DNS service to apply changes? (Y/N)"
+        if ($restart -match '^[Yy]') {
+            Restart-Service -Name DNS -Force -ErrorAction Stop
+            Write-Host "  ✓ DNS service restarted" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠ DNS service restart required for changes to take effect" -ForegroundColor Yellow
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error applying DNS SIGRed mitigation: $_" -ForegroundColor Red
+    }
+}
+
+function Test-SuspiciousServices {
+    Write-Host "Checking for suspicious services..." -ForegroundColor Cyan
+    
+    try {
+        $suspiciousServices = @()
+        $allServices = Get-WmiObject -Class Win32_Service -ErrorAction SilentlyContinue
+        
+        foreach ($service in $allServices) {
+            $suspicious = $false
+            $reasons = @()
+            
+            # Check for services running from temp locations
+            if ($service.PathName -match '(\\Temp\\|\\AppData\\Local\\Temp|\\Downloads\\)') {
+                $suspicious = $true
+                $reasons += "Runs from temp location"
+            }
+            
+            # Check for services with suspicious names (common backdoor patterns)
+            if ($service.Name -match '(inetinfo|psexe|remcom|backdoor|shell|hack)' -and 
+                $service.Name -notmatch '^(W3SVC|IISADMIN)$') {
+                $suspicious = $true
+                $reasons += "Suspicious service name"
+            }
+            
+            # Check for services running as SYSTEM from non-standard locations
+            if ($service.StartName -eq 'LocalSystem' -and 
+                $service.PathName -notmatch '^[A-Z]:\\Windows\\' -and
+                $service.PathName -notmatch '^[A-Z]:\\Program Files') {
+                $suspicious = $true
+                $reasons += "System service from unusual location"
+            }
+            
+            if ($suspicious) {
+                $suspiciousServices += [PSCustomObject]@{
+                    Name = $service.Name
+                    DisplayName = $service.DisplayName
+                    PathName = $service.PathName
+                    StartName = $service.StartName
+                    State = $service.State
+                    Reasons = $reasons -join ", "
+                }
+            }
+        }
+        
+        if ($suspiciousServices.Count -gt 0) {
+            Write-Host "  ⚠ Found $($suspiciousServices.Count) suspicious service(s):" -ForegroundColor Yellow
+            $suspiciousServices | Format-Table -AutoSize -Wrap
+            
+            Write-Host "  ℹ Review these services carefully and remove any unauthorized backdoors" -ForegroundColor Yellow
+            $openServices = Read-Host "Open Services console to investigate? (Y/N)"
+            if ($openServices -match '^[Yy]') {
+                services.msc
+            }
+        } else {
+            Write-Host "  ✓ No obviously suspicious services found" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking services: $_" -ForegroundColor Red
+    }
+}
+
+function Test-ListeningPorts {
+    Write-Host "Checking listening network ports..." -ForegroundColor Cyan
+    
+    try {
+        Write-Host "  ℹ Gathering listening ports and associated processes..." -ForegroundColor Gray
+        
+        $listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | 
+            Select-Object LocalAddress, LocalPort, OwningProcess, State |
+            Sort-Object LocalPort
+        
+        if ($listeners) {
+            $portInfo = @()
+            foreach ($listener in $listeners) {
+                try {
+                    $process = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
+                    $portInfo += [PSCustomObject]@{
+                        Port = $listener.LocalPort
+                        Address = $listener.LocalAddress
+                        Process = $process.ProcessName
+                        PID = $listener.OwningProcess
+                        Path = $process.Path
+                    }
+                } catch {
+                    $portInfo += [PSCustomObject]@{
+                        Port = $listener.LocalPort
+                        Address = $listener.LocalAddress
+                        Process = "Unknown"
+                        PID = $listener.OwningProcess
+                        Path = "N/A"
+                    }
+                }
+            }
+            
+            Write-Host "  ℹ Listening ports:" -ForegroundColor Yellow
+            $portInfo | Format-Table -AutoSize
+            
+            Write-Host "  ℹ Review for suspicious listeners on non-standard ports (especially high ports)" -ForegroundColor Gray
+            Write-Host "  ℹ Common legitimate ports: 53 (DNS), 80/443 (HTTP/HTTPS), 88 (Kerberos), 135 (RPC), 389/636 (LDAP), 445 (SMB), 3389 (RDP)" -ForegroundColor Gray
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking listening ports: $_" -ForegroundColor Red
+    }
+}
+
+function Test-ADReplicationRights {
+    Write-Host "Checking Active Directory replication rights..." -ForegroundColor Cyan
+    
+    try {
+        $isDomain = (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+        
+        if (-not $isDomain) {
+            Write-Host "  ℹ Not in a domain environment, skipping AD replication check" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+            Write-Host "  ⚠ Active Directory module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Write-Host "  ℹ Checking for users with dangerous replication rights..." -ForegroundColor Yellow
+        Write-Host "  ℹ To check and fix replication rights:" -ForegroundColor Gray
+        Write-Host "    1. Open ADSI Edit" -ForegroundColor White
+        Write-Host "    2. Connect to Default naming context" -ForegroundColor White
+        Write-Host "    3. Right-click domain root > Properties > Security > Advanced" -ForegroundColor White
+        Write-Host "    4. Look for users with 'Replicating Directory Changes All' permission" -ForegroundColor White
+        Write-Host "    5. Remove this permission from non-admin users" -ForegroundColor White
+        Write-Host "  ℹ This prevents DCSync attacks" -ForegroundColor Gray
+        
+    } catch {
+        Write-Host "  ⚠ Error checking AD replication rights: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-PowerShellTranscription {
+    Write-Host "Enabling PowerShell Transcription logging..." -ForegroundColor Cyan
+    
+    try {
+        $psPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription"
+        
+        if (-not (Test-Path $psPath)) {
+            New-Item -Path $psPath -Force | Out-Null
+        }
+        
+        $currentEnabled = (Get-ItemProperty -Path $psPath -Name "EnableTranscripting" -ErrorAction SilentlyContinue).EnableTranscripting
+        $currentInvocation = (Get-ItemProperty -Path $psPath -Name "EnableInvocationHeader" -ErrorAction SilentlyContinue).EnableInvocationHeader
+        
+        if ($currentEnabled -eq 1 -and $currentInvocation -eq 1) {
+            Write-Host "  ✓ PowerShell Transcription already enabled" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $psPath -Name "EnableTranscripting" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path $psPath -Name "EnableInvocationHeader" -Value 1 -Type DWord -Force
+        Set-ItemProperty -Path $psPath -Name "OutputDirectory" -Value "C:\PowerShell_Transcripts" -Type String -Force
+        
+        # Create the transcript directory
+        if (-not (Test-Path "C:\PowerShell_Transcripts")) {
+            New-Item -Path "C:\PowerShell_Transcripts" -ItemType Directory -Force | Out-Null
+        }
+        
+        Write-Host "  ✓ PowerShell Transcription enabled" -ForegroundColor Green
+        Write-Host "  ℹ Transcripts will be saved to: C:\PowerShell_Transcripts" -ForegroundColor Gray
+        
+    } catch {
+        Write-Host "  ⚠ Error enabling PowerShell Transcription: $_" -ForegroundColor Red
+    }
+}
+
+function Set-BitLocker {
+    Write-Host "Checking BitLocker encryption status..." -ForegroundColor Cyan
+    
+    try {
+        $bitlockerVolumes = Get-BitLockerVolume -ErrorAction SilentlyContinue
+        
+        if (-not $bitlockerVolumes) {
+            Write-Host "  ℹ BitLocker cmdlets not available or no volumes found" -ForegroundColor Gray
+            return
+        }
+        
+        $unencryptedVolumes = $bitlockerVolumes | Where-Object { $_.ProtectionStatus -eq 'Off' -and $_.VolumeType -eq 'OperatingSystem' }
+        
+        if (-not $unencryptedVolumes) {
+            Write-Host "  ✓ BitLocker already enabled on operating system volumes" -ForegroundColor Green
+            return
+        }
+        
+        Write-Host "  ⚠ Found unencrypted operating system volume(s)" -ForegroundColor Yellow
+        Write-Host "  ℹ To enable BitLocker:" -ForegroundColor Gray
+        Write-Host "    1. Open Control Panel > BitLocker Drive Encryption" -ForegroundColor White
+        Write-Host "    2. Click 'Turn on BitLocker' for the system drive" -ForegroundColor White
+        Write-Host "    3. Follow the wizard to complete encryption" -ForegroundColor White
+        
+    } catch {
+        Write-Host "  ⚠ Error checking BitLocker status: $_" -ForegroundColor Red
+    }
+}
+
+function Set-DHCPAuditLogging {
+    Write-Host "Checking DHCP audit logging..." -ForegroundColor Cyan
+    
+    try {
+        $dhcpService = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
+        
+        if (-not $dhcpService) {
+            Write-Host "  ℹ DHCP Server service not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Command -Name Get-DhcpServerAuditLog -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ DHCP Server cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $auditLog = Get-DhcpServerAuditLog -ErrorAction SilentlyContinue
+        
+        if ($auditLog.Enable -eq $true) {
+            Write-Host "  ✓ DHCP audit logging already enabled" -ForegroundColor Green
+            return
+        }
+        
+        Set-DhcpServerAuditLog -Enable $true -ErrorAction Stop
+        Write-Host "  ✓ DHCP audit logging enabled" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring DHCP audit logging: $_" -ForegroundColor Red
+    }
+}
+
+function Set-DHCPServerAuthorization {
+    Write-Host "Checking DHCP server authorization..." -ForegroundColor Cyan
+    
+    try {
+        $dhcpService = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
+        
+        if (-not $dhcpService) {
+            Write-Host "  ℹ DHCP Server service not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        $isDomain = (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+        
+        if (-not $isDomain) {
+            Write-Host "  ℹ Not in domain environment, DHCP authorization not applicable" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Command -Name Get-DhcpServerInDC -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ DHCP Server cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $authorizedServers = Get-DhcpServerInDC -ErrorAction SilentlyContinue
+        $computerName = $env:COMPUTERNAME
+        
+        if ($authorizedServers | Where-Object { $_.DnsName -match $computerName }) {
+            Write-Host "  ✓ DHCP server already authorized in Active Directory" -ForegroundColor Green
+            return
+        }
+        
+        Write-Host "  ⚠ DHCP server not authorized in Active Directory" -ForegroundColor Yellow
+        Write-Host "  ℹ To authorize, run as Domain Admin:" -ForegroundColor Gray
+        Write-Host "    Add-DhcpServerInDC -DnsName $computerName" -ForegroundColor White
+        
+    } catch {
+        Write-Host "  ⚠ Error checking DHCP authorization: $_" -ForegroundColor Red
+    }
+}
+
+function Remove-UnauthorizedDHCPServers {
+    Write-Host "Checking for unauthorized DHCP servers..." -ForegroundColor Cyan
+    
+    try {
+        $isDomain = (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+        
+        if (-not $isDomain) {
+            Write-Host "  ℹ Not in domain environment, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Command -Name Get-DhcpServerInDC -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ DHCP Server cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $authorizedServers = Get-DhcpServerInDC -ErrorAction SilentlyContinue
+        
+        if ($authorizedServers) {
+            Write-Host "  ℹ Authorized DHCP servers in domain:" -ForegroundColor Yellow
+            $authorizedServers | Format-Table DnsName, IPAddress -AutoSize
+            
+            Write-Host "  ℹ Review this list and remove any unauthorized servers using:" -ForegroundColor Gray
+            Write-Host "    Remove-DhcpServerInDC -DnsName <servername>" -ForegroundColor White
+        } else {
+            Write-Host "  ✓ No DHCP servers found in Active Directory" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking DHCP servers: $_" -ForegroundColor Red
+    }
+}
+
+function Set-DHCPNameProtection {
+    Write-Host "Checking DHCP name protection..." -ForegroundColor Cyan
+    
+    try {
+        $dhcpService = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
+        
+        if (-not $dhcpService) {
+            Write-Host "  ℹ DHCP Server service not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Command -Name Get-DhcpServerv4Scope -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ DHCP Server cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $scopes = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue
+        
+        if (-not $scopes) {
+            Write-Host "  ℹ No DHCP scopes configured" -ForegroundColor Gray
+            return
+        }
+        
+        $changes = @()
+        foreach ($scope in $scopes) {
+            $dnsSetting = Get-DhcpServerv4DnsSetting -ScopeId $scope.ScopeId -ErrorAction SilentlyContinue
+            
+            if ($dnsSetting.NameProtection -ne $true) {
+                Set-DhcpServerv4DnsSetting -ScopeId $scope.ScopeId -NameProtection $true -ErrorAction SilentlyContinue
+                $changes += $scope.ScopeId.ToString()
+            }
+        }
+        
+        if ($changes.Count -eq 0) {
+            Write-Host "  ✓ DHCP name protection already enabled on all scopes" -ForegroundColor Green
+        } else {
+            Write-Host "  ✓ Enabled name protection on scopes: $($changes -join ', ')" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring DHCP name protection: $_" -ForegroundColor Red
+    }
+}
+
+function Set-DHCPLogPath {
+    Write-Host "Checking DHCP log file path..." -ForegroundColor Cyan
+    
+    try {
+        $dhcpService = Get-Service -Name DHCPServer -ErrorAction SilentlyContinue
+        
+        if (-not $dhcpService) {
+            Write-Host "  ℹ DHCP Server service not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Command -Name Get-DhcpServerAuditLog -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ DHCP Server cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $auditLog = Get-DhcpServerAuditLog -ErrorAction SilentlyContinue
+        
+        if ($auditLog.Path) {
+            Write-Host "  ✓ DHCP log path configured: $($auditLog.Path)" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠ DHCP log path not configured" -ForegroundColor Yellow
+            Write-Host "  ℹ Setting default path to C:\Windows\System32\dhcp" -ForegroundColor Gray
+            Set-DhcpServerAuditLog -Path "C:\Windows\System32\dhcp" -ErrorAction Stop
+            Write-Host "  ✓ DHCP log path configured" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking DHCP log path: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-DNSIPv6Tunneling {
+    Write-Host "Checking DNS global query block list for IPv6 tunneling..." -ForegroundColor Cyan
+    
+    try {
+        $dnsService = Get-Service -Name DNS -ErrorAction SilentlyContinue
+        
+        if (-not $dnsService) {
+            Write-Host "  ℹ DNS Server service not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Command -Name Get-DnsServerGlobalQueryBlockList -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ DNS Server cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $blockList = Get-DnsServerGlobalQueryBlockList -ErrorAction SilentlyContinue
+        
+        if ($blockList.Enable -eq $true) {
+            Write-Host "  ✓ DNS global query block list already enabled" -ForegroundColor Green
+        } else {
+            Set-DnsServerGlobalQueryBlockList -Enable $true -ErrorAction Stop
+            Write-Host "  ✓ DNS global query block list enabled (blocks IPv6 to IPv4 tunneling)" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring DNS query block list: $_" -ForegroundColor Red
+    }
+}
+
+function Set-DNSRateLimiting {
+    Write-Host "Checking DNS server rate limiting..." -ForegroundColor Cyan
+    
+    try {
+        $dnsService = Get-Service -Name DNS -ErrorAction SilentlyContinue
+        
+        if (-not $dnsService) {
+            Write-Host "  ℹ DNS Server service not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Command -Name Get-DnsServerResponseRateLimiting -ErrorAction SilentlyContinue)) {
+            Write-Host "  ⚠ DNS Server cmdlets not available" -ForegroundColor Yellow
+            return
+        }
+        
+        $rlConfig = Get-DnsServerResponseRateLimiting -ErrorAction SilentlyContinue
+        
+        if ($rlConfig.Mode -eq 'Enable') {
+            Write-Host "  ✓ DNS response rate limiting already enabled" -ForegroundColor Green
+            return
+        }
+        
+        Set-DnsServerResponseRateLimiting -Mode Enable -ErrorAction Stop
+        Write-Host "  ✓ DNS response rate limiting enabled" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring DNS rate limiting: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-DNSSlaveServer {
+    Write-Host "Checking DNS server configuration..." -ForegroundColor Cyan
+    
+    try {
+        $dnsService = Get-Service -Name DNS -ErrorAction SilentlyContinue
+        
+        if (-not $dnsService) {
+            Write-Host "  ℹ DNS Server service not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        # Check if this is a secondary (slave) DNS server
+        $dnsRegPath = "HKLM:\SYSTEM\CurrentControlSet\Services\DNS\Parameters"
+        $slaveValue = (Get-ItemProperty -Path $dnsRegPath -Name "IsSlave" -ErrorAction SilentlyContinue).IsSlave
+        
+        if ($slaveValue -eq 1) {
+            Write-Host "  ⚠ This DNS server is configured as a slave server" -ForegroundColor Yellow
+            Write-Host "  ℹ If this server should be authoritative (not a slave), convert it to a primary zone" -ForegroundColor Gray
+        } else {
+            Write-Host "  ✓ DNS server is not configured as a slave server" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking DNS configuration: $_" -ForegroundColor Red
+    }
+}
+
+function Test-KerberosDelegation {
+    Write-Host "Checking for accounts allowed to delegate Kerberos..." -ForegroundColor Cyan
+    
+    try {
+        $isDomain = (Get-WmiObject -Class Win32_ComputerSystem).PartOfDomain
+        
+        if (-not $isDomain) {
+            Write-Host "  ℹ Not in a domain environment, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+            Write-Host "  ⚠ Active Directory module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Import-Module ActiveDirectory -ErrorAction SilentlyContinue
+        
+        # Check for computer accounts trusted for delegation
+        $delegatedComputers = Get-ADComputer -Filter {TrustedForDelegation -eq $true} -Properties TrustedForDelegation -ErrorAction SilentlyContinue
+        
+        if ($delegatedComputers) {
+            Write-Host "  ⚠ Found $($delegatedComputers.Count) computer account(s) trusted for delegation:" -ForegroundColor Yellow
+            foreach ($comp in $delegatedComputers) {
+                Write-Host "    - $($comp.Name)" -ForegroundColor White
+            }
+            Write-Host "  ℹ Review these carefully - only domain controllers and specific servers should be trusted for delegation" -ForegroundColor Gray
+        } else {
+            Write-Host "  ✓ No computer accounts trusted for delegation (beyond domain controllers)" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking Kerberos delegation: $_" -ForegroundColor Red
+    }
+}
+
+function Test-ADDatabasePermissions {
+    Write-Host "Checking Active Directory database permissions..." -ForegroundColor Cyan
+    
+    try {
+        $isDC = (Get-WmiObject -Class Win32_ComputerSystem).DomainRole -ge 4
+        
+        if (-not $isDC) {
+            Write-Host "  ℹ Not a domain controller, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        Write-Host "  ℹ Checking that MEI cannot read/perform actions on AD database..." -ForegroundColor Yellow
+        Write-Host "  ℹ To verify permissions:" -ForegroundColor Gray
+        Write-Host "    1. Open ADSI Edit" -ForegroundColor White
+        Write-Host "    2. Connect to default naming context" -ForegroundColor White
+        Write-Host "    3. Right-click domain root > Properties > Security" -ForegroundColor White
+        Write-Host "    4. Verify that only authorized accounts have full control" -ForegroundColor White
+        Write-Host "    5. Remove excessive permissions from regular users/groups" -ForegroundColor White
+        
+    } catch {
+        Write-Host "  ⚠ Error checking AD permissions: $_" -ForegroundColor Red
+    }
+}
+
+function Remove-DangerousPowerShellModules {
+    Write-Host "Checking for dangerous PowerShell modules..." -ForegroundColor Cyan
+    
+    try {
+        $dangerousModules = @(
+            "PowerSploit",
+            "Nishang",
+            "Empire",
+            "PowerShellEmpire",
+            "Invoke-Mimikatz",
+            "PowerUp",
+            "PowerView"
+        )
+        
+        $foundModules = @()
+        
+        foreach ($module in $dangerousModules) {
+            if (Get-Module -ListAvailable -Name $module -ErrorAction SilentlyContinue) {
+                $foundModules += $module
+            }
+        }
+        
+        if ($foundModules.Count -gt 0) {
+            Write-Host "  ⚠ Found $($foundModules.Count) dangerous PowerShell module(s):" -ForegroundColor Yellow
+            foreach ($mod in $foundModules) {
+                Write-Host "    - $mod" -ForegroundColor White
+            }
+            
+            $remove = Read-Host "Remove these modules? (Y/N)"
+            if ($remove -match '^[Yy]') {
+                foreach ($mod in $foundModules) {
+                    try {
+                        $modulePath = (Get-Module -ListAvailable -Name $mod).ModuleBase
+                        Remove-Item -Path $modulePath -Recurse -Force -ErrorAction Stop
+                        Write-Host "    ✓ Removed $mod" -ForegroundColor Green
+                    } catch {
+                        Write-Host "    ⚠ Failed to remove $mod : $_" -ForegroundColor Red
+                    }
+                }
+            }
+        } else {
+            Write-Host "  ✓ No dangerous PowerShell modules found" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking PowerShell modules: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-ObjectAccessAuditing {
+    Write-Host "Checking object access auditing..." -ForegroundColor Cyan
+    
+    try {
+        $output = auditpol /get /subcategory:"File System" 2>&1
+        
+        if ($output -match "Success and Failure") {
+            Write-Host "  ✓ Object access auditing already enabled" -ForegroundColor Green
+            return
+        }
+        
+        auditpol /set /subcategory:"File System" /success:enable /failure:enable | Out-Null
+        Write-Host "  ✓ Object access auditing enabled" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring object access auditing: $_" -ForegroundColor Red
+    }
+}
+
+function Set-NTLMv2Only {
+    Write-Host "Configuring LAN Manager to send NTLMv2 responses only..." -ForegroundColor Cyan
+    
+    try {
+        $lsaPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
+        $currentValue = (Get-ItemProperty -Path $lsaPath -Name "LmCompatibilityLevel" -ErrorAction SilentlyContinue).LmCompatibilityLevel
+        
+        # Value 5 = Send NTLMv2 response only, refuse LM & NTLM
+        if ($currentValue -eq 5) {
+            Write-Host "  ✓ LAN Manager already configured to send NTLMv2 responses only" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $lsaPath -Name "LmCompatibilityLevel" -Value 5 -Type DWord -Force
+        Write-Host "  ✓ LAN Manager configured to send NTLMv2 responses only" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring NTLM settings: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-IISDirectoryBrowsing {
+    Write-Host "Checking IIS Directory Browsing..." -ForegroundColor Cyan
+    
+    try {
+        # Check if IIS is installed
+        $iisFeature = Get-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue
+        
+        if (-not $iisFeature -or $iisFeature.InstallState -ne 'Installed') {
+            Write-Host "  ℹ IIS not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        # Check if WebAdministration module is available
+        if (-not (Get-Module -ListAvailable -Name WebAdministration)) {
+            Write-Host "  ⚠ WebAdministration module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
+        
+        $currentValue = Get-WebConfigurationProperty -Filter /system.webServer/directoryBrowse -Name enabled -PSPath 'IIS:\' -ErrorAction SilentlyContinue
+        
+        if ($currentValue.Value -eq $false) {
+            Write-Host "  ✓ IIS Directory Browsing already disabled" -ForegroundColor Green
+            return
+        }
+        
+        Set-WebConfigurationProperty -Filter /system.webServer/directoryBrowse -Name enabled -Value $false -PSPath 'IIS:\' -ErrorAction Stop
+        Write-Host "  ✓ IIS Directory Browsing disabled" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error disabling IIS Directory Browsing: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-IISHTTPS {
+    Write-Host "Checking IIS HTTPS configuration..." -ForegroundColor Cyan
+    
+    try {
+        $iisFeature = Get-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue
+        
+        if (-not $iisFeature -or $iisFeature.InstallState -ne 'Installed') {
+            Write-Host "  ℹ IIS not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Module -ListAvailable -Name WebAdministration)) {
+            Write-Host "  ⚠ WebAdministration module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
+        
+        $httpsBinding = Get-WebBinding -Protocol https -ErrorAction SilentlyContinue
+        
+        if ($httpsBinding) {
+            Write-Host "  ✓ IIS HTTPS binding already configured" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠ No HTTPS binding found on IIS" -ForegroundColor Yellow
+            Write-Host "  ℹ To configure HTTPS:" -ForegroundColor Gray
+            Write-Host "    1. Open IIS Manager" -ForegroundColor White
+            Write-Host "    2. Select your site > Bindings" -ForegroundColor White
+            Write-Host "    3. Add HTTPS binding with SSL certificate" -ForegroundColor White
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking IIS HTTPS: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-IISDetailedErrors {
+    Write-Host "Checking IIS detailed error messages..." -ForegroundColor Cyan
+    
+    try {
+        $iisFeature = Get-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue
+        
+        if (-not $iisFeature -or $iisFeature.InstallState -ne 'Installed') {
+            Write-Host "  ℹ IIS not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Module -ListAvailable -Name WebAdministration)) {
+            Write-Host "  ⚠ WebAdministration module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
+        
+        $currentValue = Get-WebConfigurationProperty -Filter /system.webServer/httpErrors -Name errorMode -PSPath 'IIS:\' -ErrorAction SilentlyContinue
+        
+        if ($currentValue.Value -eq 'DetailedLocalOnly' -or $currentValue.Value -eq 'Custom') {
+            Write-Host "  ✓ IIS detailed errors already configured to not appear remotely" -ForegroundColor Green
+            return
+        }
+        
+        Set-WebConfigurationProperty -Filter /system.webServer/httpErrors -Name errorMode -Value 'DetailedLocalOnly' -PSPath 'IIS:\' -ErrorAction Stop
+        Write-Host "  ✓ IIS configured to not show detailed errors remotely" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring IIS error messages: $_" -ForegroundColor Red
+    }
+}
+
+function Remove-IISXPoweredByHeader {
+    Write-Host "Checking IIS X-Powered-By header..." -ForegroundColor Cyan
+    
+    try {
+        $iisFeature = Get-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue
+        
+        if (-not $iisFeature -or $iisFeature.InstallState -ne 'Installed') {
+            Write-Host "  ℹ IIS not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        if (-not (Get-Module -ListAvailable -Name WebAdministration)) {
+            Write-Host "  ⚠ WebAdministration module not available" -ForegroundColor Yellow
+            return
+        }
+        
+        Import-Module WebAdministration -ErrorAction SilentlyContinue
+        
+        $header = Get-WebConfigurationProperty -Filter /system.webServer/httpProtocol/customHeaders -Name . -PSPath 'IIS:\' -ErrorAction SilentlyContinue |
+                  Where-Object { $_.name -eq 'X-Powered-By' }
+        
+        if (-not $header) {
+            Write-Host "  ✓ X-Powered-By header already removed from IIS" -ForegroundColor Green
+            return
+        }
+        
+        Remove-WebConfigurationProperty -Filter /system.webServer/httpProtocol/customHeaders -Name . -AtElement @{name='X-Powered-By'} -PSPath 'IIS:\' -ErrorAction Stop
+        Write-Host "  ✓ X-Powered-By header removed from IIS" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error removing X-Powered-By header: $_" -ForegroundColor Red
+    }
+}
+
+function Set-ChromeTLSVersion {
+    Write-Host "Checking Chrome TLS version requirement..." -ForegroundColor Cyan
+    
+    try {
+        $chromeInstalled = Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe"
+        
+        if (-not $chromeInstalled) {
+            $chromeInstalled = Test-Path "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+        }
+        
+        if (-not $chromeInstalled) {
+            Write-Host "  ℹ Chrome not installed, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        $chromePath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
+        if (-not (Test-Path $chromePath)) {
+            New-Item -Path $chromePath -Force | Out-Null
+        }
+        
+        $currentValue = (Get-ItemProperty -Path $chromePath -Name "SSLVersionMin" -ErrorAction SilentlyContinue).SSLVersionMin
+        
+        if ($currentValue -eq "tls1.2") {
+            Write-Host "  ✓ Chrome already requires at least TLS v1.2" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $chromePath -Name "SSLVersionMin" -Value "tls1.2" -Type String -Force
+        Write-Host "  ✓ Chrome configured to require at least TLS v1.2" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring Chrome TLS version: $_" -ForegroundColor Red
+    }
+}
+
+function Set-BrowserTLSVersion {
+    Write-Host "Checking browser TLS version requirements..." -ForegroundColor Cyan
+    
+    try {
+        $changes = @()
+        
+        # Configure Chrome
+        $chromeInstalled = (Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe") -or 
+                          (Test-Path "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")
+        
+        if ($chromeInstalled) {
+            $chromePath = "HKLM:\SOFTWARE\Policies\Google\Chrome"
+            if (-not (Test-Path $chromePath)) {
+                New-Item -Path $chromePath -Force | Out-Null
+            }
+            
+            $currentValue = (Get-ItemProperty -Path $chromePath -Name "SSLVersionMin" -ErrorAction SilentlyContinue).SSLVersionMin
+            
+            if ($currentValue -ne "tls1.2") {
+                Set-ItemProperty -Path $chromePath -Name "SSLVersionMin" -Value "tls1.2" -Type String -Force
+                $changes += "Chrome"
+            }
+        }
+        
+        # Configure Firefox
+        $firefoxInstalled = Test-Path "C:\Program Files\Mozilla Firefox\firefox.exe"
+        
+        if ($firefoxInstalled) {
+            $firefoxPath = "HKLM:\SOFTWARE\Policies\Mozilla\Firefox"
+            if (-not (Test-Path $firefoxPath)) {
+                New-Item -Path $firefoxPath -Force | Out-Null
+            }
+            
+            $securityPath = "$firefoxPath\security"
+            if (-not (Test-Path $securityPath)) {
+                New-Item -Path $securityPath -Force | Out-Null
+            }
+            
+            $currentValue = (Get-ItemProperty -Path $securityPath -Name "tls.version.min" -ErrorAction SilentlyContinue)."tls.version.min"
+            
+            if ($currentValue -ne 3) {
+                Set-ItemProperty -Path $securityPath -Name "tls.version.min" -Value 3 -Type DWord -Force
+                $changes += "Firefox"
+            }
+        }
+        
+        # Configure Edge
+        $edgeInstalled = (Test-Path "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe") -or
+                        (Test-Path "C:\Program Files\Microsoft\Edge\Application\msedge.exe")
+        
+        if ($edgeInstalled) {
+            $edgePath = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+            if (-not (Test-Path $edgePath)) {
+                New-Item -Path $edgePath -Force | Out-Null
+            }
+            
+            $currentValue = (Get-ItemProperty -Path $edgePath -Name "SSLVersionMin" -ErrorAction SilentlyContinue).SSLVersionMin
+            
+            if ($currentValue -ne "tls1.2") {
+                Set-ItemProperty -Path $edgePath -Name "SSLVersionMin" -Value "tls1.2" -Type String -Force
+                $changes += "Edge"
+            }
+        }
+        
+        if ($changes.Count -eq 0) {
+            if ($chromeInstalled -or $firefoxInstalled -or $edgeInstalled) {
+                Write-Host "  ✓ All installed browsers already require TLS 1.2+" -ForegroundColor Green
+            } else {
+                Write-Host "  ℹ No supported browsers found installed" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "  ✓ Configured TLS 1.2+ requirement for: $($changes -join ', ')" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring browser TLS versions: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-MySQLRootRemoteLogin {
+    Write-Host "Checking MySQL root remote login..." -ForegroundColor Cyan
+    
+    try {
+        $mysqlService = Get-Service -Name MySQL* -ErrorAction SilentlyContinue
+        
+        if (-not $mysqlService) {
+            Write-Host "  ℹ MySQL service not found, skipping" -ForegroundColor Gray
+            return
+        }
+        
+        Write-Host "  ⚠ MySQL service detected" -ForegroundColor Yellow
+        Write-Host "  ℹ To disable root remote login:" -ForegroundColor Gray
+        Write-Host "    1. Connect to MySQL: mysql -u root -p" -ForegroundColor White
+        Write-Host "    2. Run: DELETE FROM mysql.user WHERE User='root' AND Host NOT IN ('localhost', '127.0.0.1', '::1');" -ForegroundColor White
+        Write-Host "    3. Run: FLUSH PRIVILEGES;" -ForegroundColor White
+        Write-Host "  ℹ Or use MySQL Workbench to manage user privileges" -ForegroundColor Gray
+        
+    } catch {
+        Write-Host "  ⚠ Error checking MySQL configuration: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-RDPAdminControl {
+    Write-Host "Checking RDP administrative session control..." -ForegroundColor Cyan
+    
+    try {
+        $tsPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services"
+        
+        if (-not (Test-Path $tsPath)) {
+            New-Item -Path $tsPath -Force | Out-Null
+        }
+        
+        $currentValue = (Get-ItemProperty -Path $tsPath -Name "fDisableCdm" -ErrorAction SilentlyContinue).fDisableCdm
+        
+        if ($currentValue -eq 1) {
+            Write-Host "  ✓ Administrators already cannot control RDP sessions" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $tsPath -Name "fDisableCdm" -Value 1 -Type DWord -Force
+        Write-Host "  ✓ Administrators now cannot control active RDP sessions" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring RDP admin control: $_" -ForegroundColor Red
+    }
+}
+
+function Test-7ZipVersion {
+    Write-Host "Checking 7-Zip version..." -ForegroundColor Cyan
+    
+    try {
+        $7zipPath = "C:\Program Files\7-Zip\7z.exe"
+        $7zipPath32 = "C:\Program Files (x86)\7-Zip\7z.exe"
+        
+        $path = $null
+        if (Test-Path $7zipPath) {
+            $path = $7zipPath
+        } elseif (Test-Path $7zipPath32) {
+            $path = $7zipPath32
+        }
+        
+        if (-not $path) {
+            Write-Host "  ℹ 7-Zip not installed" -ForegroundColor Gray
+            return
+        }
+        
+        $version = (Get-Item $path).VersionInfo.FileVersion
+        Write-Host "  ℹ 7-Zip version installed: $version" -ForegroundColor Yellow
+        Write-Host "  ℹ Check if this is the latest version at: https://www.7-zip.org/" -ForegroundColor Gray
+        Write-Host "  ℹ Update if newer version available" -ForegroundColor Gray
+        
+    } catch {
+        Write-Host "  ⚠ Error checking 7-Zip version: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-PrinterDriverInstallation {
+    Write-Host "Checking printer driver installation restriction..." -ForegroundColor Cyan
+    
+    try {
+        $printerPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers\PointAndPrint"
+        
+        if (-not (Test-Path $printerPath)) {
+            New-Item -Path $printerPath -Force | Out-Null
+        }
+        
+        $currentValue = (Get-ItemProperty -Path $printerPath -Name "RestrictDriverInstallationToAdministrators" -ErrorAction SilentlyContinue).RestrictDriverInstallationToAdministrators
+        
+        if ($currentValue -eq 1) {
+            Write-Host "  ✓ Printer driver installation already restricted to administrators" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $printerPath -Name "RestrictDriverInstallationToAdministrators" -Value 1 -Type DWord -Force
+        Write-Host "  ✓ Print drivers can no longer be installed over HTTP" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error restricting printer driver installation: $_" -ForegroundColor Red
+    }
+}
+
+function Enable-SensitivePrivilegeAuditing {
+    Write-Host "Checking audit usage of sensitive privileges..." -ForegroundColor Cyan
+    
+    try {
+        $output = auditpol /get /subcategory:"Sensitive Privilege Use" 2>&1
+        
+        if ($output -match "Success") {
+            Write-Host "  ✓ Sensitive privilege usage auditing already enabled" -ForegroundColor Green
+            return
+        }
+        
+        auditpol /set /subcategory:"Sensitive Privilege Use" /success:enable | Out-Null
+        Write-Host "  ✓ Audit usage of sensitive privileges enabled (Success)" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring sensitive privilege auditing: $_" -ForegroundColor Red
+    }
+}
+
+function Disable-ElevatedInstallApplications {
+    Write-Host "Checking elevated application installation setting..." -ForegroundColor Cyan
+    
+    try {
+        $installerPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer"
+        
+        if (-not (Test-Path $installerPath)) {
+            New-Item -Path $installerPath -Force | Out-Null
+        }
+        
+        $currentValue = (Get-ItemProperty -Path $installerPath -Name "AlwaysInstallElevated" -ErrorAction SilentlyContinue).AlwaysInstallElevated
+        
+        if ($currentValue -eq 0 -or $null -eq $currentValue) {
+            Write-Host "  ✓ Applications no longer install with elevated permissions" -ForegroundColor Green
+            return
+        }
+        
+        Set-ItemProperty -Path $installerPath -Name "AlwaysInstallElevated" -Value 0 -Type DWord -Force
+        
+        # Also check user policy
+        $userInstallerPath = "HKCU:\SOFTWARE\Policies\Microsoft\Windows\Installer"
+        if (Test-Path $userInstallerPath) {
+            Set-ItemProperty -Path $userInstallerPath -Name "AlwaysInstallElevated" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+        }
+        
+        Write-Host "  ✓ Applications no longer install with elevated permissions" -ForegroundColor Green
+        
+    } catch {
+        Write-Host "  ⚠ Error configuring application installation: $_" -ForegroundColor Red
+    }
+}
+
+function Remove-ScheduledTaskScripts {
+    Write-Host "Checking for suspicious scheduled task scripts..." -ForegroundColor Cyan
+    
+    try {
+        $suspiciousTasks = @()
+        $allTasks = Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' }
+        
+        foreach ($task in $allTasks) {
+            # Check if task runs PowerShell scripts
+            if ($task.Actions.Execute -match 'powershell' -and 
+                $task.Actions.Arguments -match '\.ps1') {
+                
+                # Skip if it's this hardening script
+                if ($task.Actions.Arguments -notmatch 'hardening|security|cyberpatriot') {
+                    $suspiciousTasks += [PSCustomObject]@{
+                        Name = $task.TaskName
+                        Path = $task.TaskPath
+                        Action = $task.Actions.Execute
+                        Arguments = $task.Actions.Arguments
+                    }
+                }
+            }
+        }
+        
+        if ($suspiciousTasks.Count -gt 0) {
+            Write-Host "  ⚠ Found $($suspiciousTasks.Count) scheduled task(s) running PowerShell scripts:" -ForegroundColor Yellow
+            $suspiciousTasks | Format-Table -AutoSize -Wrap
+            
+            Write-Host "  ℹ Review these tasks - remove if they are unauthorized" -ForegroundColor Yellow
+            $openTasks = Read-Host "Open Task Scheduler to review? (Y/N)"
+            if ($openTasks -match '^[Yy]') {
+                taskschd.msc
+            }
+        } else {
+            Write-Host "  ✓ No suspicious PowerShell scheduled tasks found" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking scheduled tasks: $_" -ForegroundColor Red
+    }
+}
+
+function Remove-GroupPolicyStartupScripts {
+    Write-Host "Checking Group Policy startup scripts..." -ForegroundColor Cyan
+    
+    try {
+        Write-Host "  ℹ To check Group Policy startup/shutdown scripts:" -ForegroundColor Gray
+        Write-Host "    1. Run: gpedit.msc" -ForegroundColor White
+        Write-Host "    2. Navigate to: Computer Configuration > Windows Settings > Scripts" -ForegroundColor White
+        Write-Host "    3. Check Startup and Shutdown scripts" -ForegroundColor White
+        Write-Host "    4. Remove any unauthorized PowerShell scripts" -ForegroundColor White
+        
+    } catch {
+        Write-Host "  ⚠ Error checking Group Policy scripts: $_" -ForegroundColor Red
+    }
+}
+
+function Remove-PHPBackdoors {
+    Write-Host "Checking for PHP backdoors..." -ForegroundColor Cyan
+    
+    try {
+        $webRoots = @(
+            "C:\inetpub\wwwroot",
+            "C:\xampp\htdocs",
+            "C:\wamp\www",
+            "C:\wamp64\www"
+        )
+        
+        $suspiciousFiles = @()
+        
+        foreach ($root in $webRoots) {
+            if (Test-Path $root) {
+                $phpFiles = Get-ChildItem -Path $root -Filter *.php -Recurse -ErrorAction SilentlyContinue
+                
+                foreach ($file in $phpFiles) {
+                    $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
+                    
+                    # Check for common backdoor patterns
+                    if ($content -match 'eval\(|base64_decode\(|system\(|exec\(|shell_exec\(|passthru\(|proc_open\(|popen\(') {
+                        $suspiciousFiles += $file.FullName
+                    }
+                }
+            }
+        }
+        
+        if ($suspiciousFiles.Count -gt 0) {
+            Write-Host "  ⚠ Found $($suspiciousFiles.Count) suspicious PHP file(s):" -ForegroundColor Yellow
+            $suspiciousFiles | ForEach-Object { Write-Host "    - $_" -ForegroundColor White }
+            
+            Write-Host "  ℹ Review these files for backdoors and remove if malicious" -ForegroundColor Yellow
+        } else {
+            Write-Host "  ✓ No obvious PHP backdoors found" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking for PHP backdoors: $_" -ForegroundColor Red
+    }
+}
+
+function Test-StickyKeysBackdoor {
+    Write-Host "Checking for Sticky Keys backdoor..." -ForegroundColor Cyan
+    
+    try {
+        $stickyKeysPath = "C:\Windows\System32\sethc.exe"
+        $stickyKeysBackup = "C:\Windows\System32\sethc.exe.bak"
+        
+        if (Test-Path $stickyKeysPath) {
+            $hash = (Get-FileHash -Path $stickyKeysPath -Algorithm SHA256).Hash
+            
+            # Check if sethc.exe is actually cmd.exe (common backdoor)
+            $cmdHash = (Get-FileHash -Path "C:\Windows\System32\cmd.exe" -Algorithm SHA256).Hash
+            
+            if ($hash -eq $cmdHash) {
+                Write-Host "  ⚠ Sticky Keys backdoor detected! sethc.exe is cmd.exe" -ForegroundColor Red
+                
+                if (Test-Path $stickyKeysBackup) {
+                    Copy-Item -Path $stickyKeysBackup -Destination $stickyKeysPath -Force
+                    Write-Host "  ✓ Restored sethc.exe from backup" -ForegroundColor Green
+                } else {
+                    Write-Host "  ⚠ No backup found - manually restore sethc.exe from a clean Windows install" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  ✓ No Sticky Keys backdoor detected" -ForegroundColor Green
+            }
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking Sticky Keys backdoor: $_" -ForegroundColor Red
+    }
+}
+
+function Test-AccessibilityBackdoors {
+    Write-Host "Checking for accessibility backdoors..." -ForegroundColor Cyan
+    
+    try {
+        $accessibilityFiles = @(
+            "C:\Windows\System32\sethc.exe",
+            "C:\Windows\System32\utilman.exe",
+            "C:\Windows\System32\osk.exe",
+            "C:\Windows\System32\narrator.exe",
+            "C:\Windows\System32\magnify.exe"
+        )
+        
+        $cmdHash = (Get-FileHash -Path "C:\Windows\System32\cmd.exe" -Algorithm SHA256).Hash
+        $explorerHash = (Get-FileHash -Path "C:\Windows\explorer.exe" -Algorithm SHA256).Hash
+        
+        $backdoors = @()
+        
+        foreach ($file in $accessibilityFiles) {
+            if (Test-Path $file) {
+                $hash = (Get-FileHash -Path $file -Algorithm SHA256).Hash
+                
+                if ($hash -eq $cmdHash -or $hash -eq $explorerHash) {
+                    $backdoors += $file
+                }
+            }
+        }
+        
+        if ($backdoors.Count -gt 0) {
+            Write-Host "  ⚠ Found $($backdoors.Count) accessibility backdoor(s):" -ForegroundColor Red
+            $backdoors | ForEach-Object { Write-Host "    - $_" -ForegroundColor White }
+            Write-Host "  ⚠ Restore these files from a clean Windows installation" -ForegroundColor Yellow
+        } else {
+            Write-Host "  ✓ No accessibility backdoors detected" -ForegroundColor Green
+        }
+        
+    } catch {
+        Write-Host "  ⚠ Error checking accessibility backdoors: $_" -ForegroundColor Red
+    }
+}
 
 function main {
     Write-Host "Starting Windows 2022 Server Script..." 
+    
     Manage-UsersAndGroups
+    Is-DomainJoined
     Enable-AllAuditPolicies
     disable_guest_account
     Set-AllLocalPasswords
     firewall_status
     disable_remote_services
     disable_additional_services
-
     checkUAC
+    Clear-UserProfilesSafe
     set_lockout_policy
     secure_password_policy
     enable_critical_services
-    secure_registry_settings
-    Clear-UserProfilesSafe
-    stop-DefaultSharedFolders
     Remove-ProhibitedApps
+    secure_registry_settings
+    stop-DefaultSharedFolders
     Set-UserRightsAssignments
     Set-SecPol
-    Set-DNSClientSecurity
-    Set-PowerOptions
     Set-WindowsUpdate
-    Set-ScreenSaver
-    Set-EventLogSize
-    Set-WindowsDefender
-    Find-SuspiciousScheduledTasks
-    Disable-NetBIOSoverTCP
-    Disable-UnnecessaryWindowsFeatures
-    Disable-IPv6
     Disable-AutoRun
-    Test-HostsFile
-    Test-SuspiciousFiles
+    Set-ScreenSaver
+    Disable-IPv6
+    Set-EventLogSize
+    Find-SuspiciousScheduledTasks
     Test-StartupPrograms
-
-    enforce_domain_hardening
+    Disable-UnnecessaryWindowsFeatures
+    Set-PowerOptions
+    Test-SuspiciousFiles
+    Test-HostsFile
+    Disable-NetBIOSoverTCP
+    Set-DNSClientSecurity
     harden_defender_and_exploit_protection
-
+    enforce_domain_hardening
+    Set-WindowsDefender
+    Enable-WindowsSmartScreen
+    Set-SMBSecurity
+    Secure-CAPolicy
+    Enable-ADCSDisallowedCertAutoUpdate
+    Enable-VBSMandatoryMode
+    Set-MachineIdentityIsolation
+    Set-BrowserDoNotTrack
+    Disable-PowerShell2
+    Enable-DefenderASRWebshellRule
+    Find-TamperedVBSScripts
+    Test-ShareCreationEvents
+    Set-AdvancedAuditPolicy
+    Disable-AnonymousSAMEnumeration
+    Enable-LSAProtection
+    Disable-AnonymousLDAPBind
+    Disable-KerberosPreAuthBypass
+    Test-PasswordExpiration
+    Disable-PowerShellRemoting
+    Test-DelegationRights
+    Disable-SMBCompression
+    Enable-SMBEncryption
+    Set-DNSSIGRedMitigation
+    Test-SuspiciousServices
+    Test-ListeningPorts
+    Test-ADReplicationRights
+    Enable-PowerShellTranscription
+    Set-BitLocker
+    Set-DHCPAuditLogging
+    Set-DHCPServerAuthorization
+    Remove-UnauthorizedDHCPServers
+    Set-DHCPNameProtection
+    Set-DHCPLogPath
+    Disable-DNSIPv6Tunneling
+    Set-DNSRateLimiting
+    Disable-DNSSlaveServer
+    Test-KerberosDelegation
+    Test-ADDatabasePermissions
+    Remove-DangerousPowerShellModules
+    Enable-ObjectAccessAuditing
+    Set-NTLMv2Only
+    Disable-IISDirectoryBrowsing
+    Enable-IISHTTPS
+    Disable-IISDetailedErrors
+    Remove-IISXPoweredByHeader
+    Set-ChromeTLSVersion
+    Set-BrowserTLSVersion
+    Disable-MySQLRootRemoteLogin
+    Disable-RDPAdminControl
+    Test-7ZipVersion
+    Disable-PrinterDriverInstallation
+    Enable-SensitivePrivilegeAuditing
+    Disable-ElevatedInstallApplications
+    Remove-ScheduledTaskScripts
+    Remove-GroupPolicyStartupScripts
+    Remove-PHPBackdoors
+    Test-StickyKeysBackdoor
+    Test-AccessibilityBackdoors
 }
 main
