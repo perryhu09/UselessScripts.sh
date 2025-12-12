@@ -1,0 +1,36 @@
+# Service Blacklist - Unnecessary/Risky Services
+# Lines starting with # are comments
+# One service per line
+
+# Printing services
+cups
+cups-browsed
+
+# Network discovery/mDNS
+avahi-daemon
+avahi
+
+# Torrent clients
+deluged
+deluge-web
+transmission-daemon
+qbittorrent
+rtorrent
+ktorrent
+
+# Telnet (insecure)
+telnetd
+inetd
+xinetd
+
+# Bluetooth (often unnecessary in competitions)
+bluetooth
+
+# SNMP (rarely needed, security risk)
+snmpd
+snmp
+
+# Note: Web servers (apache2, nginx), FTP (vsftpd, proftpd),
+# databases (mysql, postgresql), and other service-specific
+# configurations should be reviewed based on README requirements
+# before being added here. These are handled by specific modules.
