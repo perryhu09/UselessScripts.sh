@@ -1,12 +1,8 @@
 #!/bin/bash
-# os_updates.sh - Operating System Updates
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 
-# Module: Operating System Updates
-# Category: System Updates
-# Description: Operating System Updates
 enable_security_updates(){
     log_action "=== ENSURING SECURITY UPDATE REPOSITORIES ARE ENABLED ==="
 
@@ -136,7 +132,6 @@ install_security_dependencies() {
   done
 }
 
-# Main runner
 run_os_updates() {
     log_section "Starting OS Updates and Security Patches"
     enable_security_updates

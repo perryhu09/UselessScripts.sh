@@ -1,12 +1,9 @@
 #!/bin/bash
-# os_settings.sh - OS Security Settings
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 
-# Module: OS Settings
-# Category: OS Security
-# Description: Misc. OS stuff that needs hardening: grub, kernel, etc
+# misc. os stuff (grub, kernel, etc)
 
 harden_kernel_sysctl() {
   log_action "=== HARDENING KERNEL VIA SYSCTL ==="
@@ -708,7 +705,7 @@ configure_firewall() {
 
   log_action "Firewall configuration complete"
 }
-# Main runner
+
 run_os_settings() {
     log_section "Starting OS Settings Module"
 

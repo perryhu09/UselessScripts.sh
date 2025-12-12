@@ -1,14 +1,8 @@
 #!/bin/bash
-# prohibited_files.sh - Prohibited Files Module with AI Analysis
-# Scans for and removes prohibited media and unauthorized files
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 source "$SCRIPT_DIR/../lib/openrouter.sh"
-
-# Module: Prohibited Files
-# Category: Prohibited Files
-# Description: Finds and handles prohibited media files (audio, video, etc.)
 
 readonly PROHIBITED_MEDIA_EXTS=(
     "mp3" "mp4" "m4a" "m4v" "aac" "ogg" "oga" "opus" "wav" "flac" "wma"

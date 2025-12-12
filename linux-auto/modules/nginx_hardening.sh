@@ -1,12 +1,8 @@
 #!/bin/bash
-# nginx_hardening.sh - Nginx Hardening Module
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 
-# Module: Nginx Hardening
-# Category: Service Hardening
-# Description: Hardens Nginx configuration
 harden_nginx() {
   log_action "=== HARDENING NGINX CONFIGURATION ==="
 
@@ -145,7 +141,7 @@ EOF
 
   log_action "NGINX hardening complete"
 }
-# Main runner
+
 run_nginx_hardening() {
     log_section "Starting Nginx Hardening"
     harden_nginx

@@ -1,20 +1,12 @@
 #!/bin/bash
-# user_auditing.sh - User Auditing and Management with AI Integration
-# Manages users based on README parsing and security best practices
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 
-# Try to load readme_parser for AI-based user information
 if [[ -f "$SCRIPT_DIR/readme_parser.sh" ]]; then
     source "$SCRIPT_DIR/readme_parser.sh"
 fi
 
-# Module: User Auditing and Management
-# Category: User Security
-# Description: Audits and manages user accounts based on README requirements
-
-# Get authorized users from README or fallback to global arrays
 get_all_authorized_users_list() {
     if [[ "${README_PARSED:-0}" -eq 1 ]] && type -t get_authorized_users >/dev/null 2>&1; then
         get_authorized_users
@@ -25,7 +17,6 @@ get_all_authorized_users_list() {
     fi
 }
 
-# Get admin users from README or fallback to global arrays
 get_all_admin_users_list() {
     if [[ "${README_PARSED:-0}" -eq 1 ]] && type -t get_authorized_admins >/dev/null 2>&1; then
         get_authorized_admins
@@ -36,7 +27,6 @@ get_all_admin_users_list() {
     fi
 }
 
-# Get terminated users from README
 get_all_terminated_users_list() {
     if [[ "${README_PARSED:-0}" -eq 1 ]] && type -t get_terminated_users >/dev/null 2>&1; then
         get_terminated_users
@@ -48,19 +38,16 @@ get_all_terminated_users_list() {
 remove_unauthorized_users() {
     log_action "=== CHECKING FOR UNAUTHORIZED USERS ==="
 
-    # Get authorized users list
     local -a authorized_users_arr=()
     while IFS= read -r user; do
         [[ -n "$user" ]] && authorized_users_arr+=("$user")
     done < <(get_all_authorized_users_list)
 
-    # Get admin users list
     local -a admin_users_arr=()
     while IFS= read -r user; do
         [[ -n "$user" ]] && admin_users_arr+=("$user")
     done < <(get_all_admin_users_list)
 
-    # Get terminated users list
     local -a terminated_users_arr=()
     while IFS= read -r user; do
         [[ -n "$user" ]] && terminated_users_arr+=("$user")
@@ -70,7 +57,6 @@ remove_unauthorized_users() {
     log_info "Admin users: ${admin_users_arr[*]:-none}"
     log_info "Terminated users: ${terminated_users_arr[*]:-none}"
 
-    # First, remove explicitly terminated users
     for user in "${terminated_users_arr[@]}"; do
         if id "$user" &>/dev/null; then
             log_action "Removing terminated user: $user"
@@ -83,7 +69,6 @@ remove_unauthorized_users() {
         fi
     done
 
-    # Now check for unauthorized users
     CURRENT_USERS=$(awk -F: '($3 >=1000 || $3 == 0) && $1 != "nobody" {print $1}' /etc/passwd)
 
     for user in $CURRENT_USERS; do
@@ -91,7 +76,6 @@ remove_unauthorized_users() {
             continue
         fi
 
-        # Check if user is in admin list
         local is_admin=0
         for admin in "${admin_users_arr[@]}"; do
             if [[ "$admin" == "$user" ]]; then
@@ -105,7 +89,6 @@ remove_unauthorized_users() {
             continue
         fi
 
-        # Check if user is in authorized list
         local is_authorized=0
         for auth_user in "${authorized_users_arr[@]}"; do
             if [[ "$auth_user" == "$user" ]]; then
@@ -119,7 +102,6 @@ remove_unauthorized_users() {
             continue
         fi
 
-        # If we have no authorized users list, don't remove anyone (safety)
         if [[ ${#authorized_users_arr[@]} -eq 0 && ${#admin_users_arr[@]} -eq 0 ]]; then
             log_warn "No authorized users list available - skipping user removal for safety"
             log_warn "User $user would be removed if authorized list was available"
@@ -154,7 +136,6 @@ fix_admin_group() {
 
     SUDO_MEMBERS=$(getent group sudo | cut -d: -f4 | tr ',' ' ')
 
-    # Remove unauthorized users from sudo group
     for user in $SUDO_MEMBERS; do
         local is_admin=0
         for admin in "${admin_users_arr[@]}"; do
@@ -170,7 +151,6 @@ fix_admin_group() {
         fi
     done
 
-    # Add authorized admin users to sudo group
     for user in "${admin_users_arr[@]}"; do
         if id "$user" &>/dev/null; then
             usermod -aG sudo "$user" &>/dev/null
@@ -206,7 +186,6 @@ create_missing_users() {
             continue
         fi
 
-        # Check if user already exists
         if id "$username" &>/dev/null; then
             log_debug "User $username already exists"
             continue
@@ -214,23 +193,19 @@ create_missing_users() {
 
         log_action "Creating user: $username (type: $account_type)"
 
-        # Create user
         useradd -m -s /bin/bash "$username" 2>/dev/null
         if [[ $? -eq 0 ]]; then
             log_success "Created user: $username"
             users_created=$((users_created + 1))
 
-            # Set password
             printf '%s:%s\n' "$username" 'Cyb3rPatr!0t' | chpasswd --crypt-method SHA512
             log_action "Set password for user: $username"
 
-            # Add to sudo if admin
             if [[ "$account_type" == "admin" ]]; then
                 usermod -aG sudo "$username" &>/dev/null
                 log_action "Added $username to sudo group (admin)"
             fi
 
-            # Handle groups
             local groups=$(echo "$user_json" | jq -r '.groups[]? // empty')
             for group in $groups; do
                 if getent group "$group" >/dev/null 2>&1; then
@@ -472,11 +447,9 @@ lock_root_account() {
     fi
 }
 
-# Main runner
 run_user_auditing() {
     log_section "Starting User Auditing"
 
-    # Try to parse README if not already done
     if [[ "${README_PARSED:-0}" -eq 0 ]]; then
         log_info "README not parsed yet, attempting to parse..."
         if type -t parse_readme >/dev/null 2>&1 && parse_readme; then
@@ -486,31 +459,14 @@ run_user_auditing() {
         fi
     fi
 
-    # Create groups first (needed for user creation)
     create_groups_from_readme
-
-    # Create missing users from README
     create_missing_users
-
-    # Now remove unauthorized users
     remove_unauthorized_users
-
-    # Fix admin group membership
     fix_admin_group
-
-    # Check for UID 0 violations
     check_uid_zero
-
-    # Check group sudo privileges
     check_group_sudo_privileges
-
-    # Disable guest account
     disable_guest
-
-    # Set all passwords
     set_all_user_passwords
-
-    # Lock root account
     lock_root_account
 
     log_success "User Auditing completed"

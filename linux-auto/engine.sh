@@ -1,25 +1,19 @@
 #!/bin/bash
-# engine.sh - CyberPatriot Linux Auto-AI Remediation Engine
-# Main script that orchestrates all security modules with AI assistance
+# Built by Enlo Cybercrime gang @:>
 
 set -euo pipefail
 
-# Get engine directory (stable even after sourcing modules that define SCRIPT_DIR)
 ENGINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ENGINE_DIR
 
-# Load core libraries
 source "$ENGINE_DIR/lib/utils.sh"
 source "$ENGINE_DIR/lib/openrouter.sh"
 
-# Default settings
 SCORE_FILE="${SCORE_FILE:-/var/log/cyberpatriot/score.log}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/cyberpatriot}"
 
-# All available modules (populated dynamically)
 MODULES=()
 
-# Preferred module execution order to avoid conflicts and redundant work
 DESIRED_MODULE_ORDER=(
     readme_parser
     forensics_questions
@@ -44,20 +38,16 @@ DESIRED_MODULE_ORDER=(
     os_settings
 )
 
-# Remove common formatting issues from module identifiers
 sanitize_module_name() {
     local raw="$1"
 
-    # Strip carriage returns that can show up when archives are extracted on Windows
     raw="${raw//$'\r'/}"
 
-    # Use sed to trim leading/trailing whitespace without altering interior spacing
     raw="$(printf '%s' "$raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
 
     printf '%s' "$raw"
 }
 
-# Discover modules present in the modules directory
 discover_modules() {
     MODULES=()
 
@@ -75,7 +65,6 @@ discover_modules() {
         [[ -n "$module_name" ]] && available_modules+=("$module_name")
     done < <(find "$ENGINE_DIR/modules" -maxdepth 1 -type f -name '*.sh' -print)
 
-    # Track which modules have already been added to avoid duplicates
     declare -A added_modules=()
 
     for preferred in "${DESIRED_MODULE_ORDER[@]}"; do
@@ -88,7 +77,6 @@ discover_modules() {
         done
     done
 
-    # Append any remaining modules not in the preferred list, sorted for stability
     local remaining=()
     for candidate in "${available_modules[@]}"; do
         if [[ -z "${added_modules[$candidate]:-}" ]]; then
@@ -106,7 +94,6 @@ discover_modules() {
     return 0
 }
 
-# Ensure module scripts are executable so they can be sourced reliably
 ensure_module_permissions() {
     if [[ ! -d "$ENGINE_DIR/modules" ]]; then
         log_warn "Modules directory not found when ensuring permissions"
@@ -124,7 +111,6 @@ ensure_module_permissions() {
     done < <(find "$ENGINE_DIR/modules" -maxdepth 1 -type f -name '*.sh')
 }
 
-# Load configuration (API key, model, and LOG_LEVEL)
 CONFIG_FILE="$ENGINE_DIR/config.conf"
 if [[ -f "$CONFIG_FILE" ]]; then
     source "$CONFIG_FILE"
@@ -134,29 +120,27 @@ else
     log_warn "Using default settings"
 fi
 
-# Ensure module scripts are ready and build the module list dynamically
-ensure_module_permissions
+ensure_module_permissions 
 if ! discover_modules; then
     log_error "Failed to discover modules"
     exit 1
 fi
 
-# Banner
+
 show_banner() {
     echo -e "${COLOR_BOLD}${COLOR_CYAN}"
     cat << "EOF"
  ____________________________
 |                            |
-|  CyberPatriot Linux        |
-|  Auto-AI Remediation       |
-|  Engine v1.0.0             |
+|  Enlo Cybercrime gang      |
+|  We hacking yo shit        |
+|  Whos dumbahh can't spell  |
 |____________________________|
 
 EOF
     echo -e "${COLOR_RESET}"
 }
 
-# Check system compatibility
 check_system() {
     log_section "System Check"
 
@@ -179,7 +163,6 @@ check_system() {
     fi
 }
 
-# Repair APT sources for supported distributions
 repair_apt_sources() {
     log_section "Repairing APT Sources"
 
@@ -242,7 +225,6 @@ EOF
     fi
 }
 
-# Update locate database for forensics module
 update_locate_database() {
     log_section "Updating Locate Database"
 
@@ -259,7 +241,6 @@ update_locate_database() {
     fi
 }
 
-# Check dependencies
 check_deps() {
     log_section "Dependency Check"
 
@@ -284,14 +265,12 @@ check_deps() {
     done
 }
 
-# Load a module
 load_module() {
     local module_name
     module_name="$(sanitize_module_name "$1")"
     local module_path="$ENGINE_DIR/modules/${module_name}.sh"
 
     if [[ ! -f "$module_path" ]]; then
-        # Attempt a case-insensitive search as a fallback
         local fallback_path
         fallback_path=$(find "$ENGINE_DIR/modules" -maxdepth 1 -type f -iname "${module_name}.sh" -print -quit 2>/dev/null || true)
 
@@ -311,7 +290,6 @@ load_module() {
         set +u
     fi
 
-    # shellcheck source=/dev/null
     source "$module_path"
     local source_status=$?
 
@@ -326,13 +304,11 @@ load_module() {
     return 0
 }
 
-# Run a module
 run_module() {
     local module_name="$1"
 
     log_section "Running Module: $module_name"
 
-    # Load module if not already loaded
     if ! declare -f "run_${module_name}" >/dev/null 2>&1; then
         if ! load_module "$module_name"; then
             log_error "Failed to load module: $module_name"
@@ -340,13 +316,11 @@ run_module() {
         fi
     fi
 
-    # Check if module has run function
     if ! declare -f "run_${module_name}" >/dev/null 2>&1; then
         log_warn "Module $module_name does not have a run_${module_name} function"
         return 1
     fi
 
-    # Run the module
     local start_time=$(date +%s)
     local had_nounset=0
     if [[ $- == *u* ]]; then
@@ -373,7 +347,6 @@ run_module() {
     return $exit_code
 }
 
-# Run all enabled modules
 run_all_modules() {
     log_section "Running All Modules"
 
@@ -381,7 +354,6 @@ run_all_modules() {
     local successful_modules=()
 
     for module in "${MODULES[@]}"; do
-        # Skip comments
         [[ "$module" =~ ^#.*$ ]] && continue
 
         if run_module "$module"; then
@@ -405,7 +377,6 @@ run_all_modules() {
     fi
 }
 
-# Interactive mode
 interactive_mode() {
     log_section "Interactive Mode"
 
@@ -453,7 +424,6 @@ interactive_mode() {
     done
 }
 
-# Show usage
 show_usage() {
     cat << EOF
 Usage: $0 [OPTIONS]
@@ -481,12 +451,10 @@ Configuration:
 EOF
 }
 
-# Main function
 main() {
     local mode="all"
     local selected_module=""
 
-    # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -h|--help)
@@ -532,33 +500,24 @@ main() {
         esac
     done
 
-    # Show banner
     show_banner
 
-    # Check root privileges
     require_root
 
-    # Check system
     check_system
 
-    # Repair APT sources early to ensure package operations succeed
     repair_apt_sources
 
-    # Update locate database for forensics module
     update_locate_database
 
-    # Check dependencies
     check_deps
 
-    # Create necessary directories
     mkdir -p "$BACKUP_DIR"
     mkdir -p "$(dirname "$SCORE_FILE")"
     mkdir -p "$ENGINE_DIR/data"
 
-    # Ensure all module scripts are executable before running them
     ensure_module_permissions
 
-    # Run based on mode
     case "$mode" in
         all)
             run_all_modules
@@ -576,5 +535,4 @@ main() {
     log_info "Check log file: $LOG_FILE"
 }
 
-# Run main function
 main "$@"

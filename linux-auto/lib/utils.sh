@@ -1,10 +1,8 @@
 #!/bin/bash
-# utils.sh - Utility functions for CyberPatriot Linux hardening
 
 [[ -n "${UTILS_SH_LOADED:-}" ]] && return 0
 readonly UTILS_SH_LOADED=1
 
-# Color codes
 readonly COLOR_RESET='\033[0m'
 readonly COLOR_RED='\033[0;31m'
 readonly COLOR_GREEN='\033[0;32m'
@@ -14,17 +12,14 @@ readonly COLOR_MAGENTA='\033[0;35m'
 readonly COLOR_CYAN='\033[0;36m'
 readonly COLOR_BOLD='\033[1m'
 
-# Log levels
 readonly LOG_DEBUG=0
 readonly LOG_INFO=1
 readonly LOG_WARN=2
 readonly LOG_ERROR=3
 readonly LOG_SUCCESS=4
 
-# Global log level
 LOG_LEVEL=${LOG_LEVEL:-$LOG_INFO}
 
-# Set up log file
 if [ -n "$SUDO_USER" ]; then
   ACTUAL_USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
 else
@@ -32,7 +27,6 @@ else
 fi
 LOG_FILE="${LOG_FILE:-$ACTUAL_USER_HOME/Desktop/hardening.log}"
 
-# Logging functions
 log_debug() {
     [[ $LOG_LEVEL -le $LOG_DEBUG ]] && echo -e "${COLOR_CYAN}[DEBUG]${COLOR_RESET} $*" >&2
 }
@@ -64,7 +58,6 @@ log_action() {
   echo "$message" >>"$LOG_FILE" 2>/dev/null
 }
 
-# Helper functions
 require_root() {
     if [[ $EUID -ne 0 ]]; then
         log_error "This script must be run as root (use sudo)"
@@ -76,7 +69,6 @@ command_exists() {
     command -v "$1" &>/dev/null
 }
 
-# Ensure required dependencies are installed
 check_dependencies() {
     local missing=()
 
@@ -95,7 +87,6 @@ check_dependencies() {
     return 0
 }
 
-# Detect OS distribution
 detect_os() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
@@ -105,7 +96,6 @@ detect_os() {
     fi
 }
 
-# Detect OS version
 detect_os_version() {
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
@@ -115,7 +105,6 @@ detect_os_version() {
     fi
 }
 
-# Check if OS is supported
 is_supported_os() {
     local os=$(detect_os)
     local version=$(detect_os_version)
@@ -140,7 +129,6 @@ get_timestamp() {
     date +%Y-%m-%d_%H:%M:%S
 }
 
-# Export functions
 export -f log_debug log_info log_warn log_error log_success log_section log_action
 export -f require_root command_exists check_dependencies
 export -f detect_os detect_os_version is_supported_os

@@ -1,28 +1,20 @@
 #!/bin/bash
-# service_auditing.sh - Service Auditing Module with AI Analysis
-# Audits running services and manages critical/unnecessary services
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 source "$SCRIPT_DIR/../lib/openrouter.sh"
 
-# Try to load readme_parser for critical services detection
 if [[ -f "$SCRIPT_DIR/readme_parser.sh" ]]; then
     source "$SCRIPT_DIR/readme_parser.sh"
 fi
 
-# Module: Service Auditing
-# Category: Service Management
-# Description: Ensures critical services are running and unnecessary services are stopped
 
-# Services that should ALWAYS be enabled/started (regardless of README)
 readonly ALWAYS_START_SERVICES=(
     "apparmor"
     "auditd"
     "ufw"
 )
 
-# Packages to install if missing
 readonly REQUIRED_PACKAGES=(
     "apparmor"
     "apparmor-utils"
@@ -30,7 +22,6 @@ readonly REQUIRED_PACKAGES=(
     "ufw"
 )
 
-# Services that should ALWAYS be stopped/disabled (regardless of README)
 readonly ALWAYS_STOP_SERVICES=(
     # Printing services
     "cups"
@@ -56,7 +47,6 @@ readonly ALWAYS_STOP_SERVICES=(
     "snmp"
 )
 
-# System prompt for AI service analysis
 read -r -d '' SERVICE_ANALYSIS_PROMPT <<'EOF' || true
 You are a security specialist analyzing running services on a CyberPatriot competition system.
 
@@ -79,13 +69,11 @@ Rules:
 - If nothing fits a list, return an empty array for that list.
 EOF
 
-# Check if a package is installed
 is_package_installed() {
     local package="$1"
     dpkg -l "$package" 2>/dev/null | grep -q "^ii"
 }
 
-# Install required packages
 install_required_packages() {
     log_section "Installing Required Security Packages"
 
@@ -114,26 +102,22 @@ install_required_packages() {
     fi
 }
 
-# Get all running services
 get_running_services() {
     systemctl list-units --type=service --state=running --no-pager --no-legend | \
         awk '{print $1}' | sed 's/.service$//'
 }
 
-# Get all enabled services
 get_enabled_services() {
     systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend | \
         awk '{print $1}' | sed 's/.service$//'
 }
 
-# Check if service exists
 service_exists() {
     local service="$1"
     systemctl list-unit-files --type=service --all --no-pager --no-legend | \
         grep -q "^${service}.service"
 }
 
-# Start and enable a service
 start_enable_service() {
     local service="$1"
 
@@ -144,7 +128,6 @@ start_enable_service() {
 
     local changed=0
 
-    # Enable service
     if ! systemctl is-enabled --quiet "$service" 2>/dev/null; then
         log_info "Enabling $service..."
         if systemctl enable "$service" 2>&1; then
@@ -157,7 +140,6 @@ start_enable_service() {
         log_debug "$service is already enabled"
     fi
 
-    # Start service if not running
     if ! systemctl is-active --quiet "$service" 2>/dev/null; then
         log_info "Starting $service..."
         if systemctl start "$service" 2>&1; then
@@ -173,7 +155,6 @@ start_enable_service() {
     return $changed
 }
 
-# Stop and disable a service
 stop_disable_service() {
     local service="$1"
     local reason="${2:-No reason provided}"
@@ -199,7 +180,6 @@ stop_disable_service() {
         fi
     fi
 
-    # Disable service if enabled
     if systemctl is-enabled --quiet "$service" 2>/dev/null; then
         log_info "Disabling $service..."
         if systemctl disable "$service" 2>&1; then
@@ -210,7 +190,6 @@ stop_disable_service() {
         fi
     fi
 
-    # Mask the service for extra security (prevents manual start)
     if ! systemctl is-masked --quiet "$service" 2>/dev/null; then
         log_info "Masking $service..."
         if systemctl mask "$service" 2>&1; then
@@ -224,7 +203,6 @@ stop_disable_service() {
     return $changed
 }
 
-# Handle hardcoded services that should always be started
 handle_always_start_services() {
     log_section "Enabling Critical Security Services"
 
@@ -243,7 +221,6 @@ handle_always_start_services() {
     fi
 }
 
-# Handle hardcoded services that should always be stopped
 handle_always_stop_services() {
     log_section "Disabling Unnecessary Services (Hardcoded)"
 
@@ -262,40 +239,7 @@ handle_always_stop_services() {
     fi
 }
 
-# Also handle blacklist file if it exists
-disable_from_blacklist() {
-    local BLACKLIST_FILE="$SCRIPT_DIR/../service_blacklist.txt"
 
-    if [[ ! -f "$BLACKLIST_FILE" ]]; then
-        log_debug "No service blacklist file found at $BLACKLIST_FILE"
-        return 0
-    fi
-
-    log_section "Processing Service Blacklist"
-    log_info "Reading prohibited services from: $BLACKLIST_FILE"
-
-    local service_count=0
-    local disabled_count=0
-
-    while IFS= read -r service || [[ -n "$service" ]]; do
-        # Skip empty lines and comments
-        [[ -z "$service" || "$service" =~ ^[[:space:]]*# ]] && continue
-
-        # Clean up whitespace
-        service=$(echo "$service" | xargs)
-        [[ -z "$service" ]] && continue
-
-        ((service_count++))
-
-        if stop_disable_service "$service" "From blacklist file"; then
-            ((disabled_count++))
-        fi
-    done <"$BLACKLIST_FILE"
-
-    log_info "Processed $service_count services from blacklist, disabled $disabled_count"
-}
-
-# Get AI recommendations for services
 get_service_recommendations() {
     local running_services="$1"
     local critical_services="$2"
@@ -317,7 +261,6 @@ $critical_services
 
 Please analyze these services and recommend which ones should be stopped/disabled for security."
 
-    # Construct JSON payload
     local payload=$(jq -n \
         --arg model "$OPENROUTER_MODEL" \
         --arg system "$SERVICE_ANALYSIS_PROMPT" \
@@ -338,7 +281,6 @@ Please analyze these services and recommend which ones should be stopped/disable
             "max_tokens": 3000
         }')
 
-    # Make API request
     local response=$(curl -s -X POST "$OPENROUTER_API_URL" \
         -H "Authorization: Bearer $OPENROUTER_API_KEY" \
         -H "Content-Type: application/json" \
@@ -350,7 +292,6 @@ Please analyze these services and recommend which ones should be stopped/disable
         return 1
     fi
 
-    # Extract the content from response
     local content=$(echo "$response" | jq -r '.choices[0].message.content' 2>/dev/null)
 
     if [[ -z "$content" || "$content" == "null" ]]; then
@@ -361,7 +302,6 @@ Please analyze these services and recommend which ones should be stopped/disable
 
     log_debug "AI Response received"
 
-    # Extract JSON from response
     local json_data=$(extract_json_from_response "$content")
 
     if [[ $? -ne 0 ]]; then
@@ -373,18 +313,15 @@ Please analyze these services and recommend which ones should be stopped/disable
     return 0
 }
 
-# Apply AI recommendations
 apply_service_recommendations() {
     local recommendations="$1"
 
     log_section "AI Service Analysis Results"
 
-    # Save recommendations to file
     mkdir -p "$SCRIPT_DIR/../data"
     echo "$recommendations" | jq '.' > "$SCRIPT_DIR/../data/service_recommendations.json"
     log_info "Saved recommendations to: $SCRIPT_DIR/../data/service_recommendations.json"
 
-    # Display what will be kept
     echo ""
     log_info "Services recommended to KEEP running:"
     local keep_count=$(echo "$recommendations" | jq '.services_to_keep | length')
@@ -398,7 +335,6 @@ apply_service_recommendations() {
 
     echo ""
 
-    # Display stop recommendations
     log_info "Services recommended to STOP:"
     local stop_count=$(echo "$recommendations" | jq '.services_to_stop | length')
 
@@ -407,7 +343,6 @@ apply_service_recommendations() {
         return 0
     fi
 
-    # Show what will be stopped
     echo "$recommendations" | jq -r '.services_to_stop[] | "  - \(.name): \(.reason)"' | while read line; do
         log_warn "$line"
     done
@@ -415,7 +350,6 @@ apply_service_recommendations() {
     echo ""
     log_info "Stopping and disabling recommended services..."
 
-    # Apply stop recommendations
     local stopped_count=0
     echo "$recommendations" | jq -r '.services_to_stop[] | "\(.name)|\(.reason)"' | while IFS='|' read -r service reason; do
         log_info "Processing: $service"
@@ -429,7 +363,6 @@ apply_service_recommendations() {
     log_success "Processed $stop_count service stop recommendations"
 }
 
-# Audit running services
 audit_running_services() {
     log_section "Auditing Running Services"
 
@@ -441,30 +374,23 @@ audit_running_services() {
     log_info "Review services above manually if needed"
 }
 
-# Main service auditing function
 run_service_auditing() {
     log_section "Service Auditing Module"
 
-    # Ensure BACKUP_DIR is set
     if [[ -z "${BACKUP_DIR:-}" ]]; then
         BACKUP_DIR="/var/backups/cyberpatriot"
         log_warn "BACKUP_DIR not set, using default: $BACKUP_DIR"
     fi
     mkdir -p "$BACKUP_DIR"
 
-    # Install required packages
     install_required_packages
 
-    # Handle hardcoded services (always start)
     handle_always_start_services
 
-    # Handle hardcoded services (always stop)
     handle_always_stop_services
 
-    # Handle blacklist file
     disable_from_blacklist
 
-    # Make sure README is parsed so we honor critical services
     if [[ "${README_PARSED:-0}" -eq 0 ]]; then
         log_warn "README not parsed, attempting to parse for critical services..."
 
@@ -475,14 +401,12 @@ run_service_auditing() {
         fi
     fi
 
-    # Get running services
     log_section "Analyzing Dynamic Services"
     log_info "Gathering running services..."
     local running_services=$(get_running_services)
     local running_count=$(echo "$running_services" | wc -l)
     log_info "Found $running_count running services"
 
-    # Get critical services from README
     local critical_services=""
     if [[ "${README_PARSED:-0}" -eq 1 ]]; then
         log_info "Retrieving critical services from README..."
@@ -505,7 +429,6 @@ run_service_auditing() {
         critical_services="none"
     fi
 
-    # Get AI recommendations if configured
     if check_openrouter_config 2>/dev/null; then
         log_info "Requesting AI analysis from OpenRouter..."
         local recommendations=$(get_service_recommendations "$running_services" "$critical_services")
@@ -520,7 +443,6 @@ run_service_auditing() {
         log_warn "OpenRouter not configured - skipping AI-based service analysis"
     fi
 
-    # Final audit
     audit_running_services
 
     log_success "Service auditing completed successfully"

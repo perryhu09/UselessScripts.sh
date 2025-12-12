@@ -1,6 +1,4 @@
 #!/bin/bash
-# forensics_questions.sh - Forensics Questions Module
-# Handles discovery and AI-assisted answering of CyberPatriot forensic questions
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
@@ -17,7 +15,6 @@ readonly FORENSICS_SYSTEM_PROMPT='You are a CyberPatriot Linux forensic analyst.
 }
 Use an array for answers even when there is only one. Set needs_manual_review to true if you are not confident. Omit command_requests or return an empty array when no additional data is required. Provide a complete set of command requests in a single step whenever feasible, and you have at most three total exchanges to finish the task. After receiving command output, provide final answers and avoid asking for more commands.'
 
-# Discover forensic question files on user desktops
 discover_forensics_questions() {
     local -a entries=()
     local -a search_paths=("/home"/*/Desktop "/root/Desktop")
@@ -72,7 +69,6 @@ build_forensics_user_message() {
         }' | jq -c '.'
 }
 
-# Call OpenRouter with the provided chat history
 call_forensics_openrouter() {
     local messages_json="$1"
 
@@ -116,13 +112,11 @@ call_forensics_openrouter() {
     return 0
 }
 
-# Ensure the requested command is not empty before execution
 is_safe_forensics_command() {
     local command="$1"
     [[ -n "${command//[[:space:]]/}" ]]
 }
 
-# Normalize command requests into a JSON array
 extract_forensics_command_requests() {
     local response_json="$1"
 
@@ -221,7 +215,6 @@ write_forensics_answers() {
     return 0
 }
 
-# Execute an AI-requested command and capture output
 execute_forensics_command() {
     local command="$1"
 
@@ -253,7 +246,6 @@ execute_forensics_command() {
         '{command: $command, exit_code: $exit_code, stdout: $stdout, stderr: $stderr}'
 }
 
-# Handle AI interaction workflow and return the final JSON payload of answers
 obtain_forensics_answers() {
     local questions_json="$1"
     local label="${2:-all}"
@@ -352,10 +344,6 @@ obtain_forensics_answers() {
 
     return 0
 }
-
-# Module: Forensics Questions
-# Category: Forensics Questions
-# Description: Searches for forensic question files, reads their content, and obtains AI-assisted answers
 
 run_forensics_questions() {
     log_info "Starting Forensics Questions module..."

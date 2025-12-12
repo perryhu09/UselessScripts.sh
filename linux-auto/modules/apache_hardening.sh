@@ -1,12 +1,8 @@
 #!/bin/bash
-# apache_hardening.sh - Apache Hardening Module
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 
-# Module: Apache Hardening
-# Category: Service Hardening
-# Description: Hardens Apache configuration
 harden_apache() {
   log_action "=== HARDENING APACHE CONFIGURATION ==="
 
@@ -197,7 +193,6 @@ EOF
   log_action "Security applied: version hidden, TRACE disabled, directory listing off, security headers enabled"
 }
 
-# Main runner
 run_apache_hardening() {
     log_section "Starting Apache Hardening"
     harden_apache

@@ -1,5 +1,5 @@
 #!/bin/bash
-# openrouter.sh - OpenRouter API interface for AI-powered analysis
+
 # Requires: curl, jq
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -11,12 +11,10 @@ fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
 
-# OpenRouter API configuration
 OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
 OPENROUTER_API_URL="https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL="${OPENROUTER_MODEL:-anthropic/claude-3.5-sonnet}"
 
-# System prompt for README extraction
 read -r -d '' SYSTEM_PROMPT <<'EOF' || true
 You are a specialized assistant that extracts structured information from CyberPatriot competition README files.
 
@@ -58,7 +56,6 @@ Guidelines:
 - Return ONLY the JSON object, no additional text or explanation.
 EOF
 
-# Check if API key is configured
 check_openrouter_config() {
     if [[ -z "$OPENROUTER_API_KEY" ]]; then
         log_error "OpenRouter API key not configured"
@@ -68,7 +65,6 @@ check_openrouter_config() {
     return 0
 }
 
-# Remove HTML tags from content (using perl for multi-line support)
 remove_html_tags() {
     local content="$1"
 
@@ -94,7 +90,6 @@ remove_html_tags() {
     echo "$content"
 }
 
-# Call OpenRouter API with README content
 invoke_readme_extraction() {
     local plain_text="$1"
     local url="${2:-unknown}"
@@ -106,7 +101,6 @@ invoke_readme_extraction() {
     log_debug "Calling OpenRouter API for README extraction..."
     log_debug "Using model: $OPENROUTER_MODEL"
 
-    # Construct JSON payload
     local payload=$(jq -n \
         --arg model "$OPENROUTER_MODEL" \
         --arg system "$SYSTEM_PROMPT" \
@@ -127,7 +121,6 @@ invoke_readme_extraction() {
             "max_tokens": 4000
         }')
 
-    # Make API request
     local response=$(curl -s -X POST "$OPENROUTER_API_URL" \
         -H "Authorization: Bearer $OPENROUTER_API_KEY" \
         -H "Content-Type: application/json" \
@@ -139,7 +132,6 @@ invoke_readme_extraction() {
         return 1
     fi
 
-    # Extract the content from response
     local content=$(echo "$response" | jq -r '.choices[0].message.content' 2>/dev/null)
 
     if [[ -z "$content" || "$content" == "null" ]]; then
@@ -152,32 +144,26 @@ invoke_readme_extraction() {
     return 0
 }
 
-# Extract JSON from model response (handles cases where model adds extra text)
 extract_json_from_response() {
     local text="$1"
 
-    # Try to parse as-is first
     if echo "$text" | jq -e '.' >/dev/null 2>&1; then
         echo "$text"
         return 0
     fi
 
-    # Try to parse JSON that is wrapped in a fenced ```json code block
     local fenced_json=$(echo "$text" | sed -n '/```json/,/```/p' | sed '1d;$d')
     if [[ -n "$fenced_json" ]] && echo "$fenced_json" | jq -e '.' >/dev/null 2>&1; then
         echo "$fenced_json"
         return 0
     fi
 
-    # Try to parse JSON from any fenced code block
     local fenced_block=$(echo "$text" | sed -n '/```/,/```/p' | sed '1d;$d')
     if [[ -n "$fenced_block" ]] && echo "$fenced_block" | jq -e '.' >/dev/null 2>&1; then
         echo "$fenced_block"
         return 0
     fi
 
-    # Try to extract JSON object from text
-    # Use (?s) to make . (dot) match newlines, in case the JSON is multi-line
     local extracted=$(echo "$text" | grep -oP '(?s)\{.*\}' | head -1)
 
     if [[ -n "$extracted" ]] && echo "$extracted" | jq -e '.' >/dev/null 2>&1; then
@@ -185,7 +171,6 @@ extract_json_from_response() {
         return 0
     fi
 
-    # Try to extract a JSON array if no object was found
     local extracted_array=$(echo "$text" | grep -oP '(?s)\[.*\]' | head -1)
     if [[ -n "$extracted_array" ]] && echo "$extracted_array" | jq -e '.' >/dev/null 2>&1; then
         echo "$extracted_array"
@@ -197,7 +182,6 @@ extract_json_from_response() {
     return 1
 }
 
-# Test OpenRouter connection
 test_openrouter() {
     if ! check_openrouter_config; then
         return 1

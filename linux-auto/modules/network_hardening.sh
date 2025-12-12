@@ -1,12 +1,7 @@
 #!/bin/bash
-# network_hardening.sh - Network security settings
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
-
-# Module: Network Hardening
-# Category: Network security
-# Description: Network security and firewall configuration
 
 fix_hosts_file() {
   log_action "=== SECURING /etc/hosts FILE ==="

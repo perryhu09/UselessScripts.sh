@@ -1,19 +1,12 @@
 #!/bin/bash
-# unwanted_software.sh - Unwanted Software Module with AI Analysis
-# Identifies and removes unauthorized or dangerous software
 
 MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$MODULE_DIR/../lib/utils.sh"
 source "$MODULE_DIR/../lib/openrouter.sh"
 
-# Attempt to source README utilities for accessing global README context
 if [[ -f "$MODULE_DIR/readme_parser.sh" ]]; then
     source "$MODULE_DIR/readme_parser.sh"
 fi
-
-# Module: Unwanted Software
-# Category: Unwanted Software
-# Description: Removes unauthorized applications and potential security risks
 
 read -r -d '' UNWANTED_SYSTEM_PROMPT <<'EOF'
 You are an elite defensive cybersecurity analyst helping a CyberPatriot team triage Linux packages for removal.
@@ -452,52 +445,6 @@ interactive_package_removal() {
     fi
 
     return 0
-}
-
-# Also process blacklist file if it exists
-remove_from_blacklist() {
-    local BLACKLIST_FILE="$MODULE_DIR/../package_blacklist.txt"
-
-    if [[ ! -f "$BLACKLIST_FILE" ]]; then
-        log_debug "No package blacklist file found at $BLACKLIST_FILE"
-        return 0
-    fi
-
-    log_section "Processing Package Blacklist"
-    log_info "Reading prohibited packages from: $BLACKLIST_FILE"
-
-    local package_count=0
-    local removed_count=0
-
-    while IFS= read -r package || [[ -n "$package" ]]; do
-        # Skip empty lines and comments
-        [[ -z "$package" || "$package" =~ ^[[:space:]]*# ]] && continue
-
-        # Clean up whitespace
-        package=$(echo "$package" | xargs)
-        [[ -z "$package" ]] && continue
-
-        ((package_count++))
-
-        # Check if package is installed
-        if dpkg -l 2>/dev/null | grep -q "^ii  $package "; then
-            log_info "Removing package: $package"
-            if apt purge -y "$package" &>/dev/null; then
-                ((removed_count++))
-                log_success "Successfully removed: $package"
-            else
-                log_warn "Failed to remove: $package"
-            fi
-        else
-            log_debug "Package $package not installed (skipping)"
-        fi
-    done <"$BLACKLIST_FILE"
-
-    # Clean up dependencies
-    log_info "Cleaning up orphaned dependencies..."
-    apt autoremove -y &>/dev/null
-
-    log_info "Processed $package_count packages from blacklist, removed $removed_count"
 }
 
 run_unwanted_software() {

@@ -1,6 +1,4 @@
 #!/bin/bash
-# readme_parser.sh - README parsing module
-# Finds, parses, and extracts structured information from CyberPatriot README files
 
 if [[ -n "${README_PARSER_SH_LOADED:-}" ]]; then
     return 0
@@ -11,7 +9,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 source "$SCRIPT_DIR/../lib/openrouter.sh"
 
-# Paths to check for README files
 README_CANDIDATES=(
     "/opt/CyberPatriot/README.html"    # Standard CyberPatriot install path (HTML)
     "/opt/CyberPatriot/README.desktop" # CyberPatriot desktop shortcut (mixed case)
@@ -22,11 +19,9 @@ README_CANDIDATES=(
     "/tmp/README.html"                  # Temporary location
 )
 
-# Global variable to store parsed README data
 declare -g README_DATA=""
 declare -g README_PARSED=0
 
-# Find README HTML file
 find_readme_html() {
     log_debug "Searching for README.html file..."
 
@@ -45,7 +40,6 @@ find_readme_html() {
     return 1
 }
 
-# If we find a README desktop entry, attempt to download the linked README HTML
 download_readme_from_desktop() {
     local desktop_file="$1"
 
@@ -85,7 +79,6 @@ download_readme_from_desktop() {
     return 0
 }
 
-# Read and parse README file
 parse_readme() {
     local readme_path="${1:-}"
     local cleanup_download=""
@@ -101,7 +94,6 @@ parse_readme() {
         fi
     fi
 
-    # If the detected file is a desktop entry, download the actual README HTML
     if [[ "${readme_path,,}" == *.desktop ]]; then
         local downloaded_path
         downloaded_path=$(download_readme_from_desktop "$readme_path") || return 1
@@ -177,7 +169,6 @@ parse_readme() {
     return 0
 }
 
-# Primary entry point for the module
 run_readme_parser() {
     log_section "README Parser Module"
 
@@ -190,7 +181,6 @@ run_readme_parser() {
     return 1
 }
 
-# Display summary of parsed README
 display_readme_summary() {
     local json="$1"
 
@@ -232,7 +222,6 @@ display_readme_summary() {
     echo ""
 }
 
-# Get all authorized users
 get_authorized_users() {
     if [[ $README_PARSED -eq 0 ]]; then
         log_error "README not parsed yet. Call parse_readme first."
@@ -245,7 +234,6 @@ get_authorized_users() {
     ' | grep -v '^$' | sort -u
 }
 
-# Get authorized admin users
 get_authorized_admins() {
     if [[ $README_PARSED -eq 0 ]]; then
         log_error "README not parsed yet. Call parse_readme first."
@@ -263,7 +251,6 @@ get_authorized_admins() {
     ' | grep -v '^$' | sort -u
 }
 
-# Get users to create
 get_users_to_create() {
     if [[ $README_PARSED -eq 0 ]]; then
         log_error "README not parsed yet. Call parse_readme first."
@@ -273,7 +260,6 @@ get_users_to_create() {
     echo "$README_DATA" | jq -c '.recent_hires[]?'
 }
 
-# Get terminated users
 get_terminated_users() {
     if [[ $README_PARSED -eq 0 ]]; then
         log_error "README not parsed yet. Call parse_readme first."
@@ -283,7 +269,6 @@ get_terminated_users() {
     echo "$README_DATA" | jq -r '.terminated_users[]'
 }
 
-# Get critical services
 get_critical_services() {
     if [[ $README_PARSED -eq 0 ]]; then
         log_error "README not parsed yet. Call parse_readme first."
@@ -293,7 +278,6 @@ get_critical_services() {
     echo "$README_DATA" | jq -r '.critical_services[]'
 }
 
-# Check if user is authorized
 is_user_authorized() {
     local username="$1"
 
@@ -312,7 +296,6 @@ is_user_authorized() {
     ' >/dev/null 2>&1
 }
 
-# Check if user should be admin
 is_user_admin() {
     local username="$1"
 
@@ -332,7 +315,6 @@ is_user_admin() {
     ' >/dev/null 2>&1
 }
 
-# Check if user is terminated
 is_user_terminated() {
     local username="$1"
 
@@ -346,7 +328,6 @@ is_user_terminated() {
     [[ $count -gt 0 ]]
 }
 
-# Get groups to create
 get_groups_to_create() {
     if [[ $README_PARSED -eq 0 ]]; then
         log_error "README not parsed yet. Call parse_readme first."
@@ -356,7 +337,6 @@ get_groups_to_create() {
     echo "$README_DATA" | jq -r '.groups_to_create[]?'
 }
 
-# Get system users to restrict
 get_system_users_to_restrict() {
     if [[ $README_PARSED -eq 0 ]]; then
         log_error "README not parsed yet. Call parse_readme first."
@@ -366,7 +346,6 @@ get_system_users_to_restrict() {
     echo "$README_DATA" | jq -r '.system_users_to_restrict[]?'
 }
 
-# Get user groups for a specific user
 get_user_groups() {
     local username="$1"
 
@@ -383,7 +362,6 @@ get_user_groups() {
     ' | grep -v '^$' | sort -u
 }
 
-# Export functions
 export -f find_readme_html parse_readme display_readme_summary
 export -f get_authorized_users get_authorized_admins get_users_to_create
 export -f get_terminated_users get_critical_services

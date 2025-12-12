@@ -1,12 +1,7 @@
 #!/bin/bash
-# account_policy.sh - Account and Password Policies
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
-
-# Module: Account and Password Policies
-# Category: Account Security
-# Description: Account and Password Policies
 
 disallow_empty_passwords() {
   log_action "=== DISALLOWING EMPTY PASSWORDS ==="
@@ -150,11 +145,10 @@ set_password_aging() {
   done
 }
 
-# Main runner
 run_account_policy() {
     log_section "Starting Account Policy Configuration"
     disallow_empty_passwords
-    configure_account_lockout
+    # configure_account_lockout
     configure_pam
     set_password_aging
     log_success "Account Policy Configuration completed"

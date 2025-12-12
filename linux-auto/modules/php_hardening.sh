@@ -1,12 +1,8 @@
 #!/bin/bash
-# php_hardening.sh - Php Hardening Module
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
 
-# Module: Php Hardening
-# Category: Service Hardening
-# Description: Hardens Php configuration
 harden_php(){
   log_action "=== HARDENING PHP CONFIGURATION ==="
 
@@ -145,7 +141,7 @@ HTACCESS
 
   log_action "PHP hardening complete"
 }
-# Main runner
+
 run_php_hardening() {
     log_section "Starting Php Hardening"
     harden_php

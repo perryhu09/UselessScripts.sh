@@ -1,12 +1,7 @@
 #!/bin/bash
-# ssh_hardening.sh - SSH Server Hardening
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
-
-# Module: SSH Hardening
-# Category: Service Hardening
-# Description: Hardens SSH server configuration
 
 harden_ssh() {
   log_action "=== HARDENING SSH CONFIGURATION ==="
@@ -223,7 +218,6 @@ EOF
   log_action "SSH hardening complete"
 }
 
-# Main runner
 run_ssh_hardening() {
     log_section "Starting SSH Hardening"
     harden_ssh

@@ -1,12 +1,7 @@
 #!/bin/bash
-# file_permissions.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../lib/utils.sh"
-
-# Module: File Permissions
-# Category: File Security
-# Description: File Permissions 
 
 secure_file_permissions() {
   log_action "=== SECURING FILE PERMISSIONS ==="
