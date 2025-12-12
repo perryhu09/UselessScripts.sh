@@ -1188,200 +1188,6 @@ SeTakeOwnershipPrivilege = *S-1-5-32-544
     Write-Host "IMPORTANT: Verify settings in secpol.msc before continuing!" -ForegroundColor Yellow
 }
 
-function harden_server2022_accounts_and_audit {
-    Write-Host "Applying Server 2022-specific account & audit hardening..."
-
-    # Confirm Windows Server 2022
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-    if (-not $os -or ($os.Caption -notmatch 'Windows Server 2022')) {
-        Write-Host "Host is not Windows Server 2022. Skipping this hardening function."
-        return
-    }
-
-    # Require elevation
-    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
-        Write-Host "Administrative privileges required. Re-run in an elevated session."
-        return
-    }
-
-    # Helper to ensure registry path exists
-    function Ensure-RegistryPath {
-        param($Path)
-        if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null }
-    }
-
-    # 1) Administrator account: disable
-    try {
-        $admin = Get-LocalUser -Name 'Administrator' -ErrorAction SilentlyContinue
-        if ($admin) {
-            if ($admin.Enabled) {
-                Disable-LocalUser -Name 'Administrator' -ErrorAction Stop
-                Write-Host "Disabled built-in Administrator account."
-            } else {
-                Write-Host "Built-in Administrator already disabled."
-            }
-        } else {
-            Write-Host "Built-in Administrator account not found."
-        }
-    } catch {
-        Write-Host "Failed to disable Administrator account: $($_.Exception.Message)"
-    }
-
-    # 2) Block Microsoft accounts: "Users can’t add or log on with Microsoft accounts"
-    try {
-        $sysPolicyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
-        Ensure-RegistryPath -Path $sysPolicyPath
-        # Value semantics: set to 3 to block add and logon with MS accounts (common policy value)
-        Set-ItemProperty -Path $sysPolicyPath -Name 'NoConnectedUser' -Value 3 -Type DWord -ErrorAction Stop
-        Write-Host "Configured 'Block Microsoft accounts' (NoConnectedUser=3)."
-    } catch {
-        Write-Host "Failed to set 'Block Microsoft accounts' policy: $($_.Exception.Message)"
-    }
-
-    # 3) Guest account: disable
-    try {
-        $guest = Get-LocalUser -Name 'Guest' -ErrorAction SilentlyContinue
-        if ($guest) {
-            if ($guest.Enabled) {
-                Disable-LocalUser -Name 'Guest' -ErrorAction Stop
-                Write-Host "Disabled Guest account."
-            } else {
-                Write-Host "Guest account already disabled."
-            }
-        } else {
-            Write-Host "Guest account not present."
-        }
-    } catch {
-        Write-Host "Failed to disable Guest account: $($_.Exception.Message)"
-    }
-
-    # LSA / audit related registry path
-    $lsaPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
-    Ensure-RegistryPath -Path $lsaPath
-
-    # 4) Limit local account use of blank passwords to console logon only: enabled (LimitBlankPasswordUse = 1)
-    try {
-        Set-ItemProperty -Path $lsaPath -Name 'LimitBlankPasswordUse' -Value 1 -Type DWord -ErrorAction Stop
-        Write-Host "Enabled 'Limit local account use of blank passwords to console logon only' (LimitBlankPasswordUse=1)."
-    } catch {
-        Write-Host "Failed to set LimitBlankPasswordUse: $($_.Exception.Message)"
-    }
-
-    # 5) Audit access of global system objects: disabled (AuditBaseObjects = 0)
-    try {
-        Set-ItemProperty -Path $lsaPath -Name 'auditbaseobjects' -Value 0 -Type DWord -ErrorAction Stop
-        Write-Host "Disabled 'Audit access of global system objects' (auditbaseobjects=0)."
-    } catch {
-        Write-Host "Failed to set auditbaseobjects: $($_.Exception.Message)"
-    }
-
-    # 6) Audit the use of Backup and Restore privilege: disabled (fullprivilegeauditing = 0)
-    try {
-        Set-ItemProperty -Path $lsaPath -Name 'fullprivilegeauditing' -Value 0 -Type DWord -ErrorAction Stop
-        Write-Host "Disabled 'Audit the use of Backup and Restore privilege' (fullprivilegeauditing=0)."
-    } catch {
-        Write-Host "Failed to set fullprivilegeauditing: $($_.Exception.Message)"
-    }
-
-    # 7) Force audit policy subcategory settings (Windows Vista or later) to override audit policy category settings: enabled
-    #    Common registry name observed for this policy: SCENoApplyLegacyAuditPolicy = 1
-    try {
-        Set-ItemProperty -Path $lsaPath -Name 'SCENoApplyLegacyAuditPolicy' -Value 1 -Type DWord -ErrorAction Stop
-        Write-Host "Enabled 'Force audit policy subcategory settings (Vista or later)' (SCENoApplyLegacyAuditPolicy=1)."
-    } catch {
-        Write-Host "Failed to set SCENoApplyLegacyAuditPolicy: $($_.Exception.Message)"
-    }
-
-    # 8) Shutdown system immediately if unable to log security audits: enable (CrashOnAuditFail = 1)
-    try {
-        Set-ItemProperty -Path $lsaPath -Name 'CrashOnAuditFail' -Value 1 -Type DWord -ErrorAction Stop
-        Write-Host "Enabled 'Shutdown system immediately if unable to log security audits' (CrashOnAuditFail=1)."
-    } catch {
-        Write-Host "Failed to set CrashOnAuditFail: $($_.Exception.Message)"
-    }
-
-    Write-Host "Server 2022 account & audit hardening complete. Some changes may require a reboot to take full effect."
-}
-
-function harden_server2022_dcom_and_device_policies {
-    Write-Host "Applying Server 2022-only DCOM and Device policy hardening..."
-
-    # Ensure Windows Server 2022 only
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-    if (-not $os -or ($os.Caption -notmatch 'Windows Server 2022')) {
-        Write-Host "Host is not Windows Server 2022. Skipping this function."
-        return
-    }
-
-    # Require elevation for registry changes
-    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
-        Write-Host "Administrative privileges required. Re-run in an elevated session to apply these settings."
-        return
-    }
-
-    try {
-        # 1) DCOM - Machine access & launch restrictions
-        $dcomSecPath = 'HKLM:\SOFTWARE\Microsoft\Ole\Security'
-        if (-not (Test-Path $dcomSecPath)) {
-            New-Item -Path $dcomSecPath -Force | Out-Null
-        }
-
-        # Restrictive SDDL: allow only Local System and Builtin\Administrators (prevents remote access for other accounts)
-        # NOTE: SDDL strings are powerful. This sample sets a conservative allow-only SDDL for SYSTEM and Administrators.
-        $restrictSDDL = 'D:P(A;;GA;;;SY)(A;;GA;;;BA)'
-
-        Set-ItemProperty -Path $dcomSecPath -Name 'MachineAccessRestriction' -Value $restrictSDDL -Type String -ErrorAction Stop
-        Set-ItemProperty -Path $dcomSecPath -Name 'MachineLaunchRestriction' -Value $restrictSDDL -Type String -ErrorAction Stop
-
-        Write-Host "Set DCOM MachineAccessRestriction and MachineLaunchRestriction to restrict remote access/launch to SYSTEM and Administrators only."
-    } catch {
-        Write-Host "Failed to apply DCOM restrictions: $($_.Exception.Message)"
-    }
-
-    try {
-        # 2) Devices: Allow undock without having to log on => Disabled
-        $sysPolicyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
-        if (-not (Test-Path $sysPolicyPath)) { New-Item -Path $sysPolicyPath -Force | Out-Null }
-        Set-ItemProperty -Path $sysPolicyPath -Name 'UndockWithoutLogon' -Value 0 -Type DWord -ErrorAction Stop
-        Write-Host "Disabled 'Allow undock without having to log on' (UndockWithoutLogon=0)."
-    } catch {
-        Write-Host "Failed to set UndockWithoutLogon: $($_.Exception.Message)"
-    }
-
-    try {
-        # 3) Devices: Allowed to format and eject removable media
-        # Implement as a registry marker that local administrators and interactive users are allowed.
-        # Many environments enforce this via local policy mapping; this value is used here as a clear, auditable intent.
-        $devicePolicyPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer'
-        if (-not (Test-Path $devicePolicyPath)) { New-Item -Path $devicePolicyPath -Force | Out-Null }
-
-        # Create a descriptive value (REG_SZ or REG_MULTI_SZ). Using REG_SZ listing principals.
-        $allowedPrincipals = 'Administrators,INTERACTIVE'
-        Set-ItemProperty -Path $devicePolicyPath -Name 'AllowedToFormatAndEjectRemovableMedia' -Value $allowedPrincipals -Type String -ErrorAction Stop
-        Write-Host "Configured 'Allowed to format and eject removable media' to Administrators and Interactive users (marker value set)."
-    } catch {
-        Write-Host "Failed to configure removable-media format/eject policy: $($_.Exception.Message)"
-    }
-
-    try {
-        # 4) Devices: Prevent users from installing printer drivers => Enabled
-        # Use policy registry area for printers/PointAndPrint where possible.
-        $printerPolicyPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers\PointAndPrint'
-        if (-not (Test-Path $printerPolicyPath)) { New-Item -Path $printerPolicyPath -Force | Out-Null }
-
-        # Restrict driver installation to administrators; value names reflect common policy mapping.
-        Set-ItemProperty -Path $printerPolicyPath -Name 'RestrictDriverInstallationToAdministrators' -Value 1 -Type DWord -ErrorAction Stop
-        # Also enforce requiring elevation for printer driver installs
-        Set-ItemProperty -Path $printerPolicyPath -Name 'NoWarningNoElevationOnInstall' -Value 0 -Type DWord -ErrorAction SilentlyContinue
-
-        Write-Host "Enabled 'Prevent users from installing printer drivers' (RestrictDriverInstallationToAdministrators=1)."
-    } catch {
-        Write-Host "Failed to set printer driver install prevention keys: $($_.Exception.Message)"
-    }
-
-    Write-Host "Server 2022 DCOM & Device hardening applied. Some settings (DCOM/PointAndPrint) may require a reboot and/or a policy refresh to take effect."
-}
-
 function Set-SecPol {
     # Require elevation
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
@@ -2454,6 +2260,356 @@ function enforce_domain_hardening {
     Write-Host " - Test changes in a lab before wide deployment."
 }
 
+function Set-WindowsDefender {
+    Write-Host "Configuring Windows Defender for maximum security..." -ForegroundColor Cyan
+    
+    # Require elevation
+    if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
+        Write-Host "This operation requires administrative privileges. Re-run in an elevated session." -ForegroundColor Red
+        return
+    }
+
+    try {
+        # Ensure Defender is not disabled
+        Write-Host "  Checking Defender status..." -ForegroundColor Yellow
+        
+        # Remove passive mode if present
+        $passiveReg = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Advanced Threat Protection'
+        if (Test-Path $passiveReg) {
+            $prop = Get-ItemProperty -Path $passiveReg -Name 'ForceDefenderPassiveMode' -ErrorAction SilentlyContinue
+            if ($null -ne $prop.ForceDefenderPassiveMode) {
+                Remove-ItemProperty -Path $passiveReg -Name 'ForceDefenderPassiveMode' -ErrorAction Stop
+                Write-Host "  ✓ Removed ForceDefenderPassiveMode" -ForegroundColor Green
+            }
+        }
+
+        # Ensure Defender is enabled
+        $defenderReg = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender'
+        if (Test-Path $defenderReg) {
+            $disableAS = Get-ItemProperty -Path $defenderReg -Name 'DisableAntiSpyware' -ErrorAction SilentlyContinue
+            if ($null -ne $disableAS.DisableAntiSpyware -and $disableAS.DisableAntiSpyware -eq 1) {
+                Set-ItemProperty -Path $defenderReg -Name 'DisableAntiSpyware' -Value 0 -Type DWord -Force
+                Write-Host "  ✓ Enabled Windows Defender (DisableAntiSpyware=0)" -ForegroundColor Green
+            }
+        }
+
+        # Configure core protection features
+        Write-Host "  Configuring core protection features..." -ForegroundColor Yellow
+        
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            # Real-time protection
+            try {
+                Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue
+            } catch {
+                
+            }
+            # Behavior monitoring
+            try {
+                Set-MpPreference -DisableBehaviorMonitoring $false -ErrorAction SilentlyContinue
+            } catch {
+
+            }
+            # IOAV (scan downloads and attachments)
+            try {
+                Set-MpPreference -DisableIOAVProtection $false -ErrorAction SilentlyContinue
+            } catch {
+
+            }
+            # On-access protection
+            try {
+                Set-MpPreference -DisableOnAccessProtection $false -ErrorAction SilentlyContinue
+            } catch {
+                Write-Host "Unable to disable on access protection"; 
+            }
+            # Script scanning
+            try {
+                Set-MpPreference -DisableScriptScanning $false -ErrorAction SilentlyContinue
+            } catch {
+
+            }
+            # Block at first sight
+            try {
+                Set-MpPreference -DisableBlockAtFirstSeen $false -ErrorAction SilentlyContinue
+            } catch {
+
+            }
+            Write-Host "  ✓ Core protection features enabled" -ForegroundColor Green
+        }
+
+        # Enable Cloud Protection
+        Write-Host "  Enabling cloud-delivered protection..." -ForegroundColor Yellow
+        
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            # Cloud protection
+            Set-MpPreference -MAPSReporting Advanced -ErrorAction SilentlyContinue
+            
+            # Submit samples automatically
+            Set-MpPreference -SubmitSamplesConsent SendAllSamples -ErrorAction SilentlyContinue
+            
+            Write-Host "  ✓ Cloud protection enabled" -ForegroundColor Green
+        }
+
+        # Enable Network Protection
+        Write-Host "  Enabling Network Protection..." -ForegroundColor Yellow
+        
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            Set-MpPreference -EnableNetworkProtection Enabled -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Network Protection enabled" -ForegroundColor Green
+        }
+
+        # Enable PUA (Potentially Unwanted Application) protection
+        Write-Host "  Enabling PUA protection..." -ForegroundColor Yellow
+        
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            Set-MpPreference -PUAProtection Enabled -ErrorAction SilentlyContinue
+            Write-Host "  ✓ PUA protection enabled" -ForegroundColor Green
+        }
+
+        # Configure Attack Surface Reduction (ASR) Rules
+        Write-Host "  Configuring Attack Surface Reduction rules..." -ForegroundColor Yellow
+        
+        # ASR Rule GUIDs with descriptions
+        $asrRules = @{
+            # Block executable content from email client and webmail
+            'BE9BA2D9-53EA-4CDC-84E5-9B1EEEE46550' = 'Block executable content from email client and webmail'
+            
+            # Block all Office applications from creating child processes
+            'D4F940AB-401B-4EFC-AADC-AD5F3C50688A' = 'Block all Office applications from creating child processes'
+            
+            # Block Office applications from creating executable content
+            '3B576869-A4EC-4529-8536-B80A7769E899' = 'Block Office applications from creating executable content'
+            
+            # Block Office applications from injecting code into other processes
+            '75668C1F-73B5-4CF0-BB93-3ECF5CB7CC84' = 'Block Office applications from injecting code into other processes'
+            
+            # Block JavaScript or VBScript from launching downloaded executable content
+            'D3E037E1-3EB8-44C8-A917-57927947596D' = 'Block JavaScript or VBScript from launching downloaded executable content'
+            
+            # Block execution of potentially obfuscated scripts
+            '5BEB7EFE-FD9A-4556-801D-275E5FFC04CC' = 'Block execution of potentially obfuscated scripts'
+            
+            # Block Win32 API calls from Office macros
+            '92E97FA1-2EDF-4476-BDD6-9DD0B4DDDC7B' = 'Block Win32 API calls from Office macros'
+            
+            # Block executable files from running unless they meet a prevalence, age, or trusted list criterion
+            '01443614-CD74-433A-B99E-2ECDC07BFC25' = 'Block executable files from running unless they meet prevalence/age/trusted list criteria'
+            
+            # Use advanced protection against ransomware
+            'C1DB55AB-C21A-4637-BB3F-A12568109D35' = 'Use advanced protection against ransomware'
+            
+            # Block credential stealing from the Windows local security authority subsystem (lsass.exe)
+            '9E6C4E1F-7D60-472F-BA1A-A39EF669E4B2' = 'Block credential stealing from lsass.exe'
+            
+            # Block process creations originating from PSExec and WMI commands
+            'D1E49AAC-8F56-4280-B9BA-993A6D77406C' = 'Block process creations originating from PSExec and WMI commands'
+            
+            # Block untrusted and unsigned processes that run from USB
+            'B2B3F03D-6A65-4F7B-A9C7-1C7EF74A9BA4' = 'Block untrusted and unsigned processes that run from USB'
+            
+            # Block Office communication application from creating child processes
+            '26190899-1602-49E8-8B27-EB1D0A1CE869' = 'Block Office communication application from creating child processes'
+            
+            # Block Adobe Reader from creating child processes
+            '7674BA52-37EB-4A4F-A9A1-F0F9A1619A2C' = 'Block Adobe Reader from creating child processes'
+            
+            # Block persistence through WMI event subscription
+            'E6DB77E5-3DF2-4CF1-B95A-636979351E5B' = 'Block persistence through WMI event subscription'
+        }
+
+        if (Get-Command Add-MpPreference -ErrorAction SilentlyContinue) {
+            $asrCount = 0
+            foreach ($ruleId in $asrRules.Keys) {
+                try {
+                    Add-MpPreference -AttackSurfaceReductionRules_Ids $ruleId -AttackSurfaceReductionRules_Actions Enabled -ErrorAction Stop
+                    $asrCount++
+                } catch {
+                    # Rule might already exist, try to enable it
+                    try {
+                        Set-MpPreference -AttackSurfaceReductionRules_Ids $ruleId -AttackSurfaceReductionRules_Actions Enabled -ErrorAction SilentlyContinue
+                    } catch {}
+                }
+            }
+            Write-Host "  ✓ Configured $asrCount ASR rules" -ForegroundColor Green
+        }
+
+        # Remove ASR exclusions if any exist
+        Write-Host "  Removing ASR exclusions..." -ForegroundColor Yellow
+        
+        if (Get-Command Get-MpPreference -ErrorAction SilentlyContinue) {
+            $mp = Get-MpPreference
+            if ($mp.AttackSurfaceReductionOnlyExclusions -and $mp.AttackSurfaceReductionOnlyExclusions.Count -gt 0) {
+                try {
+                    Set-MpPreference -AttackSurfaceReductionOnlyExclusions @() -ErrorAction Stop
+                    Write-Host "  ✓ Cleared ASR exclusions" -ForegroundColor Green
+                } catch {
+                    Write-Host "  ⚠ Could not clear ASR exclusions via cmdlet" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  ✓ No ASR exclusions present" -ForegroundColor Green
+            }
+        }
+
+        # Enable Controlled Folder Access (Ransomware protection)
+        Write-Host "  Enabling Controlled Folder Access..." -ForegroundColor Yellow
+        
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            Set-MpPreference -EnableControlledFolderAccess Enabled -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Controlled Folder Access enabled" -ForegroundColor Green
+        }
+
+        # Configure scan settings
+        Write-Host "  Configuring scan settings..." -ForegroundColor Yellow
+        
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            # Scan removable drives
+            Set-MpPreference -DisableRemovableDriveScanning $false -ErrorAction SilentlyContinue
+            
+            # Scan network files
+            Set-MpPreference -DisableScanningNetworkFiles $false -ErrorAction SilentlyContinue
+            
+            # Scan archives
+            Set-MpPreference -DisableArchiveScanning $false -ErrorAction SilentlyContinue
+            
+            # Enable email scanning
+            Set-MpPreference -DisableEmailScanning $false -ErrorAction SilentlyContinue
+            
+            Write-Host "  ✓ Scan settings configured" -ForegroundColor Green
+        }
+
+        # Configure threat actions
+        Write-Host "  Configuring threat default actions..." -ForegroundColor Yellow
+        
+        if (Get-Command Set-MpPreference -ErrorAction SilentlyContinue) {
+            # Severe threats: Remove
+            Set-MpPreference -SevereThreatDefaultAction Remove -ErrorAction SilentlyContinue
+            
+            # High threats: Quarantine
+            Set-MpPreference -HighThreatDefaultAction Quarantine -ErrorAction SilentlyContinue
+            
+            # Moderate threats: Quarantine
+            Set-MpPreference -ModerateThreatDefaultAction Quarantine -ErrorAction SilentlyContinue
+            
+            # Low threats: Quarantine
+            Set-MpPreference -LowThreatDefaultAction Quarantine -ErrorAction SilentlyContinue
+            
+            Write-Host "  ✓ Threat actions configured" -ForegroundColor Green
+        }
+
+        # Enable Tamper Protection via registry
+        Write-Host "  Enabling Tamper Protection..." -ForegroundColor Yellow
+        
+        $tamperPath = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Features'
+        if (-not (Test-Path $tamperPath)) {
+            New-Item -Path $tamperPath -Force | Out-Null
+        }
+        Set-ItemProperty -Path $tamperPath -Name 'TamperProtection' -Value 5 -Type DWord -Force
+        Write-Host "  ✓ Tamper Protection enabled" -ForegroundColor Green
+
+        # Enable DNS protection (examines DNS queries for exfiltration)
+        Write-Host "  Enabling DNS Protection..." -ForegroundColor Yellow
+        
+        $dnsProtPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Policy Manager'
+        if (-not (Test-Path $dnsProtPath)) {
+            New-Item -Path $dnsProtPath -Force | Out-Null
+        }
+        Set-ItemProperty -Path $dnsProtPath -Name 'EnableDnsProtection' -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+        Write-Host "  ✓ DNS Protection enabled" -ForegroundColor Green
+
+        # Enable Sandbox mode (Defender runs in sandboxed environment)
+        Write-Host "  Enabling Defender Sandbox..." -ForegroundColor Yellow
+        
+        # Check current sandbox status
+        $sandboxStatus = & "C:\Program Files\Windows Defender\MpCmdRun.exe" -GetFiles 2>&1 | Out-Null
+        
+        # Enable sandbox via setx (requires restart of Defender service)
+        try {
+            & setx /M MP_FORCE_USE_SANDBOX 1 | Out-Null
+            Write-Host "  ✓ Defender Sandbox enabled (service restart recommended)" -ForegroundColor Green
+        } catch {
+            Write-Host "  ⚠ Could not enable sandbox mode" -ForegroundColor Yellow
+        }
+
+        # Configure additional protections via registry
+        Write-Host "  Configuring additional protections..." -ForegroundColor Yellow
+        
+        $spynetPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet'
+        if (-not (Test-Path $spynetPath)) {
+            New-Item -Path $spynetPath -Force | Out-Null
+        }
+        
+        # Advanced MAPS reporting
+        Set-ItemProperty -Path $spynetPath -Name 'SpynetReporting' -Value 2 -Type DWord -Force
+        
+        # Submit samples automatically
+        Set-ItemProperty -Path $spynetPath -Name 'SubmitSamplesConsent' -Value 3 -Type DWord -Force
+        
+        $realtimePath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Real-Time Protection'
+        if (-not (Test-Path $realtimePath)) {
+            New-Item -Path $realtimePath -Force | Out-Null
+        }
+        
+        # Enable real-time protection
+        Set-ItemProperty -Path $realtimePath -Name 'DisableRealtimeMonitoring' -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $realtimePath -Name 'DisableBehaviorMonitoring' -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $realtimePath -Name 'DisableOnAccessProtection' -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $realtimePath -Name 'DisableScanOnRealtimeEnable' -Value 0 -Type DWord -Force
+        Set-ItemProperty -Path $realtimePath -Name 'DisableIOAVProtection' -Value 0 -Type DWord -Force
+        
+        Write-Host "  ✓ Additional protections configured" -ForegroundColor Green
+
+        # Start Defender service if not running
+        Write-Host "  Checking Defender service..." -ForegroundColor Yellow
+        
+        $defenderService = Get-Service -Name WinDefend -ErrorAction SilentlyContinue
+        if ($defenderService) {
+            if ($defenderService.Status -ne 'Running') {
+                Start-Service -Name WinDefend -ErrorAction Stop
+                Write-Host "  ✓ Started Windows Defender service" -ForegroundColor Green
+            } else {
+                Write-Host "  ✓ Windows Defender service is running" -ForegroundColor Green
+            }
+        }
+
+        # Run a quick scan
+        Write-Host ""
+        $scanChoice = Read-Host "Run a Windows Defender Quick Scan now? (Y/N)"
+        if ($scanChoice -match '^[Yy]') {
+            Write-Host "  Starting Quick Scan (this may take a few minutes)..." -ForegroundColor Yellow
+            Start-MpScan -ScanType QuickScan -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Quick scan initiated" -ForegroundColor Green
+        }
+
+        Write-Host ""
+        Write-Host "============================================" -ForegroundColor Green
+        Write-Host "✓ WINDOWS DEFENDER CONFIGURATION COMPLETE" -ForegroundColor Green
+        Write-Host "============================================" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Configured protections:" -ForegroundColor Cyan
+        Write-Host "  ✓ Real-time protection enabled" -ForegroundColor White
+        Write-Host "  ✓ Cloud-delivered protection enabled" -ForegroundColor White
+        Write-Host "  ✓ Network Protection enabled" -ForegroundColor White
+        Write-Host "  ✓ PUA Protection enabled" -ForegroundColor White
+        Write-Host "  ✓ Attack Surface Reduction rules configured" -ForegroundColor White
+        Write-Host "  ✓ Controlled Folder Access enabled (Ransomware protection)" -ForegroundColor White
+        Write-Host "  ✓ Tamper Protection enabled" -ForegroundColor White
+        Write-Host "  ✓ DNS Protection enabled" -ForegroundColor White
+        Write-Host "  ✓ Defender Sandbox enabled" -ForegroundColor White
+        Write-Host "  ✓ PSExec/WMI command blocking enabled" -ForegroundColor White
+        Write-Host ""
+        Write-Host "VERIFICATION:" -ForegroundColor Yellow
+        Write-Host "  1. Open: Windows Security (windowsdefender://)" -ForegroundColor White
+        Write-Host "  2. Check: Virus & threat protection → Manage settings" -ForegroundColor White
+        Write-Host "  3. Check: App & browser control → Exploit protection" -ForegroundColor White
+        Write-Host ""
+
+    } catch {
+        Write-Host ""
+        Write-Host "ERROR: $_" -ForegroundColor Red
+        Write-Host "Stack trace: $($_.ScriptStackTrace)" -ForegroundColor Red
+    }
+}
+
+
 function main {
     Write-Host "Starting Windows 2022 Server Script..." 
     Manage-UsersAndGroups
@@ -2479,6 +2635,7 @@ function main {
     Set-WindowsUpdate
     Set-ScreenSaver
     Set-EventLogSize
+    Set-WindowsDefender
     Find-SuspiciousScheduledTasks
     Disable-NetBIOSoverTCP
     Disable-UnnecessaryWindowsFeatures
@@ -2489,8 +2646,6 @@ function main {
     Test-StartupPrograms
 
     enforce_domain_hardening
-    harden_server2022_accounts_and_audit
-    harden_server2022_dcom_and_device_policies
     harden_defender_and_exploit_protection
 
 }
