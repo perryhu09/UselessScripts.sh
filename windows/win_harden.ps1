@@ -185,9 +185,6 @@ function manageLocalGroups {
 
 
 function check_audit_policy {
-    param(
-        [switch]$Fix
-    )
 
     # Require elevation
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
@@ -232,20 +229,18 @@ function check_audit_policy {
     Write-Host "The following audit subcategories are missing Success and/or Failure:"
     $nonCompliant | ForEach-Object { Write-Host " - $($_.Subcategory) => $($_.Setting)" }
 
-    if ($Fix) {
-        foreach ($item in $nonCompliant) {
-            try {
-                Write-Host "Enabling Success and Failure for: $($item.Subcategory)"
-                & auditpol.exe /set /subcategory:"$($item.Subcategory)" /success:enable /failure:enable 2>&1 | Out-Null
-                Write-Host "  -> applied"
-            } catch {
-                Write-Host "  -> failed to apply: $($_)"
-            }
+    foreach ($item in $nonCompliant) {
+        try {
+            Write-Host "Enabling Success and Failure for: $($item.Subcategory)"
+            & auditpol.exe /set /subcategory:"$($item.Subcategory)" /success:enable /failure:enable 2>&1 | Out-Null
+            Write-Host "  -> applied"
+        } catch {
+            Write-Host "  -> failed to apply: $($_)"
         }
-
-        Write-Host "Re-checking audit policy..."
-        return (check_audit_policy)  # recursive call without -Fix to report final state
     }
+
+    Write-Host "Re-checking audit policy..."
+    return (check_audit_policy)  # recursive call without -Fix to report final state
 }
 
 #User Accounts
@@ -439,50 +434,6 @@ function reset_passwords {
     }
 }
 
-function windows_update {
-    Write-Host "Checking for Windows updates..."
-    try {
-        $moduleImported = $false
-
-        # Try a normal import first
-        try {
-            Import-Module PSWindowsUpdate -ErrorAction Stop
-            $moduleImported = $true
-        } catch {
-            # Search all PSModulePath locations for a PSWindowsUpdate folder and try to import from there
-            $paths = $env:PSModulePath -split ';' | Where-Object { $_ -and (Test-Path $_) }
-            foreach ($p in $paths) {
-                $candidate = Join-Path $p 'PSWindowsUpdate'
-                if (Test-Path $candidate) {
-                    try {
-                        Import-Module $candidate -ErrorAction Stop
-                        $moduleImported = $true
-                        break
-                    } catch {}
-                }
-            }
-        }
-
-        # If still not imported, attempt to install to CurrentUser (does not require admin)
-        if (-not $moduleImported) {
-            Write-Host "PSWindowsUpdate module not found in PSModulePath; attempting to install to CurrentUser..."
-            try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
-            Install-Module -Name PSWindowsUpdate -Force -Scope CurrentUser -AllowClobber -ErrorAction Stop
-            Import-Module PSWindowsUpdate -ErrorAction Stop
-            $moduleImported = $true
-        }
-
-        # Verify the cmdlet exists before invoking
-        if ($moduleImported -and (Get-Command -Name Install-WindowsUpdate -ErrorAction SilentlyContinue)) {
-            Install-WindowsUpdate -AcceptAll -AutoReboot
-            Write-Host "Windows updates installed successfully."
-        } else {
-            Write-Host "Install-WindowsUpdate cmdlet not available after importing PSWindowsUpdate."
-        }
-    } catch {
-        Write-Host "Error installing Windows updates: $_"
-    }
-}
 function antivirus_check {
     Write-Host "Checking for antivirus software..."
     try {
@@ -632,47 +583,6 @@ function disable_remote_services {
     Write-Host "Remote services adjustment complete."
 }
 
-function disable_additional_services {
-    Write-Host "Disabling additional vulnerable services..."
-
-    $servicesToDisable = @(
-        'TapiSrv',
-        'TlntSvr',
-        'ftpsvc',
-        'SNMP',
-        'SessionEnv',
-        'UmRdpService',    # Note: UmRdpService removed from target list below in favor of preserving RDP functionality
-        'SharedAccess',
-        'RemoteRegistry',
-        'SSDPSRV',
-        'W3SVC',
-        'SNMPTRAP',
-        'RemoteAccess',
-        'HomeGroupProvider',
-        'HomeGroupListener'
-    )
-
-    # Remove TermService and UmRdpService from disable list to avoid disabling RDP functionality
-    $servicesToDisable = $servicesToDisable | Where-Object { $_ -notin @('TermService','UmRdpService') }
-
-    foreach ($service in $servicesToDisable) {
-        $svc = Get-Service -Name $service -ErrorAction SilentlyContinue
-        if ($svc) {
-            try {
-                if ($svc.Status -ne 'Stopped') {
-                    Stop-Service -Name $service -Force -ErrorAction Stop
-                    Write-Host "Stopped service: $service"
-                }
-                Set-Service -Name $service -StartupType Disabled -ErrorAction Stop
-                Write-Host "Disabled service: $service"
-            } catch {
-                Write-Host "Warning: Could not modify service $service : $($_.Exception.Message)"
-            }
-        } else {
-            Write-Host "Service $service not found on this system."
-        }
-    }
-}
 function checkUAC {
     Write-Host "Checking UAC settings for maximum security..."
     $uacRegPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
@@ -1636,9 +1546,6 @@ function stop-DefaultSharedFolders {
 }
 
 function enforce_domain_hardening {
-    param(
-        [switch]$Fix
-    )
 
     Write-Host "Running domain & DC hardening checks..."
 
@@ -1664,8 +1571,6 @@ function enforce_domain_hardening {
             $currentQuota = $domain.'ms-DS-MachineAccountQuota'
             if ($null -eq $currentQuota) { $currentQuota = 10 } # default if absent
             $results.Add("MachineAccountQuota current: $currentQuota") | Out-Null
-
-            if ($Fix) {
                 try {
                     if ($currentQuota -ne 0) {
                         Set-ADDomain -Identity $domain.DNSRoot -Replace @{ 'ms-DS-MachineAccountQuota' = 0 } -ErrorAction Stop
@@ -1676,9 +1581,6 @@ function enforce_domain_hardening {
                 } catch {
                     $results.Add("Failed to set ms-DS-MachineAccountQuota: $($_.Exception.Message)") | Out-Null
                 }
-            } else {
-                $results.Add("Run with -Fix to set ms-DS-MachineAccountQuota=0 (prevents authenticated users joining machines)") | Out-Null
-            }
         } else {
             $results.Add("Not joined to an AD domain or ActiveDirectory module unavailable; cannot query/set ms-DS-MachineAccountQuota") | Out-Null
         }
@@ -1703,16 +1605,12 @@ function enforce_domain_hardening {
         foreach ($k in $desiredNetlogon.Keys) {
             $current = (Get-ItemProperty -Path $netlogonPath -Name $k -ErrorAction SilentlyContinue).$k
             if ($current -ne $desiredNetlogon[$k]) {
-                if ($Fix) {
                     try {
                         Set-ItemProperty -Path $netlogonPath -Name $k -Value $desiredNetlogon[$k] -Type DWord -ErrorAction Stop
                         $changes[$k] = "updated -> $($desiredNetlogon[$k])"
                     } catch {
                         $changes[$k] = "failed to update: $($_.Exception.Message)"
                     }
-                } else {
-                    $changes[$k] = "current=$current (run with -Fix to set $($desiredNetlogon[$k]))"
-                }
             } else {
                 $changes[$k] = "ok"
             }
@@ -1735,7 +1633,6 @@ function enforce_domain_hardening {
         $ldapName = 'LDAPServerIntegrity'
         $current = (Get-ItemProperty -Path $ldapRegPath -Name $ldapName -ErrorAction SilentlyContinue).$ldapName
         if ($current -ne 2) {
-            if ($Fix) {
                 try {
                     if (!(Test-Path $ldapRegPath)) { New-Item -Path $ldapRegPath -Force | Out-Null }
                     Set-ItemProperty -Path $ldapRegPath -Name $ldapName -Value 2 -Type DWord -ErrorAction Stop
@@ -1743,9 +1640,6 @@ function enforce_domain_hardening {
                 } catch {
                     $results.Add("Failed to set LDAPServerIntegrity: $($_.Exception.Message)") | Out-Null
                 }
-            } else {
-                $results.Add("LDAPServerIntegrity current: $current (run with -Fix to set to 2 = Require signing)") | Out-Null
-            }
         } else {
             $results.Add("LDAP server signing already set to 'Require signing' (LDAPServerIntegrity=2)") | Out-Null
         }
@@ -1761,16 +1655,12 @@ function enforce_domain_hardening {
         $name = 'CachedLogonsCount'
         $current = (Get-ItemProperty -Path $winlogonPath -Name $name -ErrorAction SilentlyContinue).$name
         if ($current -ne '0') {
-            if ($Fix) {
                 try {
                     Set-ItemProperty -Path $winlogonPath -Name $name -Value '0' -Type String -ErrorAction Stop
                     $results.Add("Set CachedLogonsCount = 0 (domain logons will not be cached)") | Out-Null
                 } catch {
                     $results.Add("Failed to set CachedLogonsCount: $($_.Exception.Message)") | Out-Null
                 }
-            } else {
-                $results.Add("CachedLogonsCount current: $current (run with -Fix to set to 0)") | Out-Null
-            }
         } else {
             $results.Add("CachedLogonsCount already 0") | Out-Null
         }
@@ -1786,7 +1676,6 @@ function enforce_domain_hardening {
         $fipsName = 'Enabled'
         $current = (Get-ItemProperty -Path $fipsPath -Name $fipsName -ErrorAction SilentlyContinue).$fipsName
         if ($current -ne 1) {
-            if ($Fix) {
                 try {
                     if (!(Test-Path $fipsPath)) { New-Item -Path $fipsPath -Force | Out-Null }
                     Set-ItemProperty -Path $fipsPath -Name $fipsName -Value 1 -Type DWord -ErrorAction Stop
@@ -1794,9 +1683,6 @@ function enforce_domain_hardening {
                 } catch {
                     $results.Add("Failed to enable FIPS policy: $($_.Exception.Message)") | Out-Null
                 }
-            } else {
-                $results.Add("FIPS policy current: $current (run with -Fix to enable)") | Out-Null
-            }
         } else {
             $results.Add("FIPS algorithm policy already enabled") | Out-Null
         }
@@ -1808,12 +1694,8 @@ function enforce_domain_hardening {
     # 6) Delegation hardening guidance (informational)
     #
     try {
-        if ($Fix) {
             $results.Add("NOTE: Hardening to prevent domain users from enabling 'trusted for delegation' requires domain ACL changes.") | Out-Null
             $results.Add("Automated ACL changes are NOT performed by this script. Use AD ACL tooling (dsacls, Set-ACL via DirectoryServices) and restrict write perms to msDS-AllowedToDelegateTo/msDS-AllowedToActOnBehalfOfOtherIdentity to privileged groups only.") | Out-Null
-        } else {
-            $results.Add("Delegation prevention (requires AD ACL changes). Run with -Fix to enforce some local settings; manual AD ACL work recommended.") | Out-Null
-        }
     } catch {}
 
     #
@@ -1832,10 +1714,6 @@ function enforce_domain_hardening {
 }
 
 function harden_defender_and_exploit_protection {
-    param(
-        [switch]$Fix
-    )
-
     # Require elevation for registry/service changes
     if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
         Write-Host "This operation requires administrative privileges. Re-run in an elevated session."
@@ -1850,12 +1728,8 @@ function harden_defender_and_exploit_protection {
         if (Test-Path $passiveReg) {
             $prop = Get-ItemProperty -Path $passiveReg -Name 'ForceDefenderPassiveMode' -ErrorAction SilentlyContinue
             if ($null -ne $prop -and $prop.ForceDefenderPassiveMode -ne $null) {
-                if ($Fix) {
                     Remove-ItemProperty -Path $passiveReg -Name 'ForceDefenderPassiveMode' -ErrorAction Stop
                     Write-Host "Removed ForceDefenderPassiveMode registry value."
-                } else {
-                    Write-Host "Detected ForceDefenderPassiveMode present; run with -Fix to remove it."
-                }
             } else {
                 Write-Host "ForceDefenderPassiveMode not present."
             }
@@ -1871,12 +1745,8 @@ function harden_defender_and_exploit_protection {
         try {
             $current = Get-MpPreference
             if ($current.EnableNetworkProtection -ne 'Enabled') {
-                if ($Fix) {
                     Set-MpPreference -EnableNetworkProtection Enabled -ErrorAction Stop
                     Write-Host "Enabled Defender Network Protection."
-                } else {
-                    Write-Host "Network Protection is not enabled; run with -Fix to enable it."
-                }
             } else {
                 Write-Host "Network Protection already enabled."
             }
@@ -1894,12 +1764,8 @@ function harden_defender_and_exploit_protection {
             if ($mp.PSObject.Properties.Name -contains 'SevereThreatDefaultAction') {
                 $sev = $mp.SevereThreatDefaultAction
                 if ($sev -eq 6) {
-                    if ($Fix) {
                         Set-MpPreference -SevereThreatDefaultAction 1 -ErrorAction Stop
                         Write-Host "Severe threat default action was 'Ignore' (6). Changed to a non-ignore action."
-                    } else {
-                        Write-Host "Severe threat default action is 'Ignore' (6). Run with -Fix to change it."
-                    }
                 } else {
                     Write-Host "Severe threat default action is not 'Ignore' (current: $sev)."
                 }
@@ -1921,12 +1787,8 @@ function harden_defender_and_exploit_protection {
             $ids = @()
             if ($mp.AttackSurfaceReductionRules_Ids) { $ids = $mp.AttackSurfaceReductionRules_Ids }
             if ($ids -notcontains $asrGuid) {
-                if ($Fix) {
                     Add-MpPreference -AttackSurfaceReductionRules_Ids @($asrGuid) -AttackSurfaceReductionRules_Actions @('Enabled') -ErrorAction Stop
                     Write-Host "Added/enabled ASR rule $asrGuid."
-                } else {
-                    Write-Host "ASR rule $asrGuid not present/enabled. Run with -Fix to enable."
-                }
             } else {
                 Write-Host "ASR rule $asrGuid already present."
             }
@@ -1948,12 +1810,8 @@ function harden_defender_and_exploit_protection {
             if ($mp.DisableIOAVProtection) { $needs += 'IOAVProtection' }
 
             if ($needs.Count -gt 0) {
-                if ($Fix) {
                     Set-MpPreference -DisableBlockAtFirstSeen $false -DisableRealtimeMonitoring $false -DisableBehaviorMonitoring $false -DisableIOAVProtection $false -ErrorAction Stop
                     Write-Host "Enabled cloud/block-at-first-seen and core real-time protections: $($needs -join ', ')."
-                } else {
-                    Write-Host "One or more cloud/real-time protections appear disabled ($($needs -join ', ')). Run with -Fix to enable them."
-                }
             } else {
                 Write-Host "Cloud and core real-time protections appear enabled."
             }
@@ -1967,7 +1825,6 @@ function harden_defender_and_exploit_protection {
         if (Get-Command -Name Get-MpPreference -ErrorAction SilentlyContinue) {
             $mp = Get-MpPreference
             if ($mp.AttackSurfaceReductionOnlyExclusions -and $mp.AttackSurfaceReductionOnlyExclusions.Count -gt 0) {
-                if ($Fix) {
                     try {
                         Set-MpPreference -AttackSurfaceReductionOnlyExclusions @() -ErrorAction Stop
                         Write-Host "Cleared AttackSurfaceReductionOnlyExclusions via Set-MpPreference."
@@ -1981,9 +1838,6 @@ function harden_defender_and_exploit_protection {
                             Write-Host "Could not clear ASR exclusions; registry path not present."
                         }
                     }
-                } else {
-                    Write-Host "ASR exclusions detected; run with -Fix to remove them."
-                }
             } else {
                 Write-Host "No AttackSurfaceReductionOnlyExclusions configured."
             }
@@ -1991,12 +1845,8 @@ function harden_defender_and_exploit_protection {
             Write-Host "Get-MpPreference not available; attempting registry removal of ASR exclusions (if present)."
             $asrReg = 'HKLM:\SOFTWARE\Microsoft\Windows Defender\Windows Defender Exploit Guard\ASR'
             if (Test-Path $asrReg) {
-                if ($Fix) {
                     Remove-ItemProperty -Path $asrReg -Name 'AttackSurfaceReductionOnlyExclusions' -ErrorAction SilentlyContinue
                     Write-Host "Removed AttackSurfaceReductionOnlyExclusions from registry."
-                } else {
-                    Write-Host "ASR registry path exists; run with -Fix to remove AttackSurfaceReductionOnlyExclusions if present."
-                }
             } else {
                 Write-Host "ASR registry path not present."
             }
@@ -2020,7 +1870,6 @@ function harden_defender_and_exploit_protection {
                     }
                 }
                 if ($depEnabled -eq $false -or $depEnabled -eq $null) {
-                    if ($Fix) {
                         try {
                             Set-ProcessMitigation -Name 'chrome.exe' -EnableForceRelocateImages 1 -ErrorAction Stop
                             Write-Host "Attempted to update Chrome exploit mitigations (DEP/mitigations). Verify in Windows Security -> Exploit Protection -> Program settings."
@@ -2028,15 +1877,11 @@ function harden_defender_and_exploit_protection {
                             Write-Host "Unable to programmatically change Chrome DEP via Set-ProcessMitigation: $($_.Exception.Message)"
                             Write-Host "Manually verify DEP is enabled for chrome.exe in Windows Security -> App & browser control -> Exploit protection -> Program settings."
                         }
-                    } else {
-                        Write-Host "Chrome exploit mitigation (DEP) not clearly enabled. Run with -Fix to attempt to enforce (or enable manually in Exploit Protection)."
-                    }
                 } else {
                     Write-Host "Chrome DEP appears enabled."
                 }
             } else {
                 Write-Host "No per-app mitigation entry for chrome.exe."
-                if ($Fix) { Write-Host "If necessary, add chrome.exe to Exploit Protection program settings and enable DEP via the UI or Set-ProcessMitigation." }
             }
         } else {
             Write-Host "Get-ProcessMitigation / Set-ProcessMitigation not available on this system. Configure Chrome DEP via Windows Security -> Exploit Protection settings."
@@ -2080,7 +1925,7 @@ function main {
     enforce_domain_hardening
     harden_defender_and_exploit_protection
 
-   
+
     Write-Host "Windows Hardening Script completed."
 }
 
