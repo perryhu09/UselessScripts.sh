@@ -669,6 +669,22 @@ secure_file_permissions() {
     [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
   fi
 
+  local pam_exec_paths=(
+    "/lib/security/pam_exec.so"
+    "/lib/x86_64-linux-gnu/security/pam_exec.so"
+  )
+
+  for module in "${pam_exec_paths[@]}"; do
+    if [[ -f "$module" ]]; then
+      total_checks=$((total_checks + 1))
+      chown root:root "$module" &>/dev/null
+      chmod 644 "$module" &>/dev/null
+      [[ $? -eq 0 ]] && fixed_count=$((fixed_count + 1))
+      log_action "Secured $module"
+    fi
+  done
+
+
   log_action "Secured password/authentication files ($fixed_count/$total_checks)"
 
   # ================================
