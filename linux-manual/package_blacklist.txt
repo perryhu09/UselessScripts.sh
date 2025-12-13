@@ -329,3 +329,5 @@ cain
 teamviewer
 anydesk
 logmein-hamachi
+fcrackzip
+xbill

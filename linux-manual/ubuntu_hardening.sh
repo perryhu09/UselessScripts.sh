@@ -279,6 +279,33 @@ check_uid_zero() {
   fi
 }
 
+check_gid_zero() {
+    log_action "=== CHECKING FOR GROUPS WITH GID 0 ==="
+
+    while IFS=: read -r groupname _ gid members; do
+        if [[ "$gid" -eq 0 && "$groupname" != "root" ]]; then
+            log_warn "Group with GID 0 found: $groupname"
+
+            NEW_GID=$(awk -F: 'BEGIN{max=999} {if($3>max) max=$3} END{print max+1}' /etc/group)
+
+            log_action "Changing GID of $groupname from 0 to $NEW_GID"
+
+            sudo groupmod -g "$NEW_GID" "$groupname"
+
+            if [[ -n "$members" ]]; then
+                IFS=',' read -ra users <<< "$members"
+                for user in "${users[@]}"; do
+                    log_action "Updating primary group of $user to $NEW_GID"
+                    sudo usermod -g "$NEW_GID" "$user"
+                done
+            fi
+
+            log_success "Group $groupname safely reassigned to GID $NEW_GID"
+        fi
+    done < /etc/group
+}
+
+
 check_group_sudo_privileges() {
   log_action "=== CHECKING GROUP SUDO PRIVILEGES ==="
 
@@ -4021,6 +4048,7 @@ main() {
   remove_unauthorized_users
   fix_admin_group
   check_uid_zero
+  check_gid_zero
   check_group_sudo_privileges
   disable_guest
   set_all_user_passwords
