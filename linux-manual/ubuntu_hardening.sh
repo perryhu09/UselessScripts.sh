@@ -427,6 +427,16 @@ disable_guest() {
         log_action "Disabled automatic login in ${dm_name} (added new setting)"
       fi
     fi
+
+    # Disable GDM Guest
+    if ! grep -q "^AllowGuest.*=.*false" "$gdm_conf"; then
+      if grep -q "^\[daemon\]" "$gdm_conf"; then
+          sed -i '/^\[daemon\]/a AllowGuest=false' "$gdm_conf"
+      else
+          echo -e "\n[daemon]\nAllowGuest=false" >>"$gdm_conf"
+      fi
+      log_action "Disabled guest sessions in ${dm_name}"
+  fi
   done
 
   log_action "Guest account disabling complete (reboot required to take effect)"
